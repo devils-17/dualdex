@@ -11,6 +11,9 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.dualdex.calculator.DamageCalculator
 import com.dualdex.companion.CompanionPresentation
 import com.dualdex.companion.CompanionViewModel
@@ -44,34 +47,50 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 1. Initialize QuickJS damage calculator engine
-        DamageCalculator.initialize(this)
-
-        // 2. Load ROM Hack JSON profiles from assets
-        loadedProfiles = ProfileLoader.loadProfilesFromAssets(this)
-        Log.i("DualDex", "Loaded ${loadedProfiles.size} ROM hack profiles.")
-
-        // 3. Initialize mGBA Libretro core
-        val corePath = "${applicationInfo.nativeLibraryDir}/mgba_libretro.so"
-        if (File(corePath).exists()) {
-            val loaded = LibretroHost.nativeLoadCore(corePath)
-            Log.i("DualDex", "Loaded mGBA Libretro core: $loaded (path=$corePath)")
-            if (loaded) {
-                audioDriver.start()
+        try {
+            // 1. Initialize QuickJS damage calculator engine in background
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                try {
+                    DamageCalculator.initialize(applicationContext)
+                } catch (e: Throwable) {
+                    Log.e("DualDex", "Failed to init DamageCalculator: ${e.message}")
+                }
             }
-        } else {
-            Log.w("DualDex", "Core file not found at: $corePath")
+
+            // 2. Load ROM Hack JSON profiles from assets
+            loadedProfiles = ProfileLoader.loadProfilesFromAssets(this)
+            Log.i("DualDex", "Loaded ${loadedProfiles.size} ROM hack profiles.")
+
+            // 3. Initialize mGBA Libretro core
+            val libDir = applicationInfo.nativeLibraryDir
+            val coreFile = listOf(
+                File(libDir, "libmgba_libretro.so"),
+                File(libDir, "mgba_libretro.so")
+            ).firstOrNull { it.exists() }
+
+            if (coreFile != null) {
+                val loaded = LibretroHost.nativeLoadCore(coreFile.absolutePath)
+                Log.i("DualDex", "Loaded mGBA Libretro core: $loaded (path=${coreFile.absolutePath})")
+                if (loaded) {
+                    audioDriver.start()
+                }
+            } else {
+                Log.w("DualDex", "Core file not found in $libDir")
+            }
+
+            // 4. Register DisplayManager listener for AYN Thor secondary display
+            displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            displayManager?.registerDisplayListener(this, null)
+
+            // 5. Setup display UI
+            setupDisplays()
+
+            // 6. Start background memory poller (10Hz)
+            viewModel.startPolling(100L)
+        } catch (e: Throwable) {
+            Log.e("DualDex", "Fatal error in onCreate: ${e.message}", e)
+            Toast.makeText(this, "Startup error: ${e.message}", Toast.LENGTH_LONG).show()
         }
-
-        // 4. Register DisplayManager listener for AYN Thor secondary display
-        displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-        displayManager?.registerDisplayListener(this, null)
-
-        // 5. Setup display UI
-        setupDisplays()
-
-        // 6. Start background memory poller (10Hz)
-        viewModel.startPolling(100L)
     }
 
     private fun handleSelectedRom(uri: Uri) {
@@ -110,8 +129,16 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
     }
 
     private fun setupDisplays() {
-        val dm = displayManager ?: return
-        val presentationDisplays = dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        val dm = displayManager ?: run {
+            setupSplitScreen()
+            return
+        }
+
+        val presentationDisplays = try {
+            dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        } catch (e: Throwable) {
+            emptyArray()
+        }
 
         if (presentationDisplays.isNotEmpty()) {
             // Dual-screen mode (AYN Thor detected)
@@ -127,56 +154,63 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
             showPresentation(presentationDisplays[0])
         } else {
-            // Single-screen fallback mode (vertical split)
-            Log.i("DualDex", "Single display detected. Running in split-screen fallback mode.")
-
-            val splitLayout = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-            }
-
-            emulatorView = EmulatorSurfaceView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    0,
-                    1.0f
-                )
-            }
-            splitLayout.addView(emulatorView)
-
-            val companionView = CompanionScreenView(
-                context = this,
-                viewModel = viewModel,
-                onOpenRomRequested = { openRomLauncher.launch(arrayOf("*/*")) },
-                onShaderChanged = { filter: ShaderFilter -> emulatorView?.setShaderFilter(filter) },
-                onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) }
-            ).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    0,
-                    1.0f
-                )
-            }
-            splitLayout.addView(companionView)
-
-            setContentView(splitLayout)
+            setupSplitScreen()
         }
     }
 
-    private fun showPresentation(display: Display) {
-        companionPresentation?.dismiss()
-        companionPresentation = CompanionPresentation(
+    private fun setupSplitScreen() {
+        Log.i("DualDex", "Running in split-screen fallback mode.")
+        val splitLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        emulatorView = EmulatorSurfaceView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+            )
+        }
+        splitLayout.addView(emulatorView)
+
+        val companionView = CompanionScreenView(
             context = this,
-            display = display,
             viewModel = viewModel,
             onOpenRomRequested = { openRomLauncher.launch(arrayOf("*/*")) },
             onShaderChanged = { filter: ShaderFilter -> emulatorView?.setShaderFilter(filter) },
             onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) }
         ).apply {
-            show()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+            )
+        }
+        splitLayout.addView(companionView)
+
+        setContentView(splitLayout)
+    }
+
+    private fun showPresentation(display: Display) {
+        try {
+            companionPresentation?.dismiss()
+            companionPresentation = CompanionPresentation(
+                context = this,
+                display = display,
+                viewModel = viewModel,
+                onOpenRomRequested = { openRomLauncher.launch(arrayOf("*/*")) },
+                onShaderChanged = { filter: ShaderFilter -> emulatorView?.setShaderFilter(filter) },
+                onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) }
+            ).apply {
+                show()
+            }
+        } catch (e: Throwable) {
+            Log.e("DualDex", "Error showing CompanionPresentation: ${e.message}, falling back to split screen", e)
+            setupSplitScreen()
         }
     }
 

@@ -78,16 +78,19 @@ class CompanionViewModel(
             while (isActive) {
                 try {
                     val gameId = _activeGameId.value
-                    val playerList = LibretroHost.nativeReadPartyFromCore(gameId).filter { !it.isEmpty && it.isValid }
-                    if (playerList.isNotEmpty() || _playerParty.value.isNotEmpty()) {
-                        _playerParty.value = playerList
-                    }
+                    val playerPartyRaw = LibretroHost.nativeReadPartyFromCore(gameId)
+                    if (playerPartyRaw != null) {
+                        val playerList = playerPartyRaw.filter { !it.isEmpty && it.isValid }
+                        if (playerList.isNotEmpty() || _playerParty.value.isNotEmpty()) {
+                            _playerParty.value = playerList
+                        }
 
-                    // Opponent / In-Battle reading
-                    val enemyList = LibretroHost.nativeReadPartyFromCore(gameId).filter { !it.isEmpty && it.isValid }
-                    _enemyParty.value = enemyList
-                    _isInBattle.value = enemyList.isNotEmpty()
-                } catch (e: Exception) {
+                        // Opponent / In-Battle reading
+                        val enemyList = playerPartyRaw.filter { !it.isEmpty && it.isValid }
+                        _enemyParty.value = enemyList
+                        _isInBattle.value = enemyList.isNotEmpty()
+                    }
+                } catch (e: Throwable) {
                     // Suppress during core startup/shutdown
                 }
                 delay(intervalMs)

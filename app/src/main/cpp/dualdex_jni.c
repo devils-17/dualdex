@@ -14,35 +14,48 @@
 static jclass g_parsed_pokemon_cls = NULL;
 static jmethodID g_parsed_pokemon_ctor = NULL;
 
+#define PARSED_POKEMON_SIG "(ZZJIILjava/lang/String;Ljava/lang/String;IIIILjava/lang/String;ZIZIJIIIIIIIIIIII[I[IIIIIIIJ)V"
+
 static void init_class_cache(JNIEnv* env) {
-    if (g_parsed_pokemon_cls != NULL) return;
+    if (g_parsed_pokemon_cls != NULL && g_parsed_pokemon_ctor != NULL) return;
 
-    jclass local_cls = (*env)->FindClass(env, "com/dualdex/pokemon/ParsedPokemon");
-    if (!local_cls) {
-        LOGE("Failed to find com.dualdex.pokemon.ParsedPokemon");
-        return;
+    if (g_parsed_pokemon_cls == NULL) {
+        jclass local_cls = (*env)->FindClass(env, "com/dualdex/pokemon/ParsedPokemon");
+        if (!local_cls) {
+            LOGE("Failed to find com.dualdex.pokemon.ParsedPokemon");
+            return;
+        }
+        g_parsed_pokemon_cls = (jclass)(*env)->NewGlobalRef(env, local_cls);
+        (*env)->DeleteLocalRef(env, local_cls);
     }
-    g_parsed_pokemon_cls = (jclass)(*env)->NewGlobalRef(env, local_cls);
-    (*env)->DeleteLocalRef(env, local_cls);
 
-    g_parsed_pokemon_ctor = (*env)->GetMethodID(
-        env,
-        g_parsed_pokemon_cls,
-        "<init>",
-        "(ZZJII"
-        "Ljava/lang/String;Ljava/lang/String;"
-        "IIIII"
-        "Ljava/lang/String;"
-        "ZIZJ"
-        "IIIIII"
-        "IIIIII"
-        "[I[I"
-        "IIIIIIJ)V"
-    );
+    if (g_parsed_pokemon_ctor == NULL && g_parsed_pokemon_cls != NULL) {
+        g_parsed_pokemon_ctor = (*env)->GetMethodID(
+            env,
+            g_parsed_pokemon_cls,
+            "<init>",
+            PARSED_POKEMON_SIG
+        );
 
-    if (!g_parsed_pokemon_ctor) {
-        LOGE("Failed to find ParsedPokemon constructor");
+        if (!g_parsed_pokemon_ctor) {
+            LOGE("Failed to find ParsedPokemon constructor with signature: %s", PARSED_POKEMON_SIG);
+        } else {
+            LOGI("ParsedPokemon constructor resolved successfully");
+        }
     }
+}
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    (void)reserved;
+    JNIEnv* env = NULL;
+    if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        LOGE("JNI_OnLoad: GetEnv failed");
+        return JNI_ERR;
+    }
+
+    init_class_cache(env);
+    LOGI("DualDex JNI_OnLoad completed");
+    return JNI_VERSION_1_6;
 }
 
 static jobject create_parsed_pokemon_object(JNIEnv* env, const ParsedPokemon* p) {
@@ -167,6 +180,7 @@ Java_com_dualdex_pokemon_PokemonBridge_readPlayerParty(
 ) {
     (void)thiz;
     init_class_cache(env);
+    if (!g_parsed_pokemon_cls) return NULL;
 
     if (!ewram_bytes) {
         return (*env)->NewObjectArray(env, 0, g_parsed_pokemon_cls, NULL);
@@ -183,8 +197,10 @@ Java_com_dualdex_pokemon_PokemonBridge_readPlayerParty(
     jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
     for (uint8_t i = 0; i < count; i++) {
         jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
-        (*env)->SetObjectArrayElement(env, array, i, p_obj);
-        (*env)->DeleteLocalRef(env, p_obj);
+        if (p_obj) {
+            (*env)->SetObjectArrayElement(env, array, i, p_obj);
+            (*env)->DeleteLocalRef(env, p_obj);
+        }
     }
 
     return array;
@@ -199,6 +215,7 @@ Java_com_dualdex_pokemon_PokemonBridge_readEnemyParty(
 ) {
     (void)thiz;
     init_class_cache(env);
+    if (!g_parsed_pokemon_cls) return NULL;
 
     if (!ewram_bytes) {
         return (*env)->NewObjectArray(env, 0, g_parsed_pokemon_cls, NULL);
@@ -215,8 +232,10 @@ Java_com_dualdex_pokemon_PokemonBridge_readEnemyParty(
     jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
     for (uint8_t i = 0; i < count; i++) {
         jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
-        (*env)->SetObjectArrayElement(env, array, i, p_obj);
-        (*env)->DeleteLocalRef(env, p_obj);
+        if (p_obj) {
+            (*env)->SetObjectArrayElement(env, array, i, p_obj);
+            (*env)->DeleteLocalRef(env, p_obj);
+        }
     }
 
     return array;
@@ -314,6 +333,10 @@ JNIEXPORT jobjectArray JNICALL
 Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobject thiz, jint game_id) {
     (void)thiz;
     init_class_cache(env);
+    if (!g_parsed_pokemon_cls) {
+        LOGE("nativeReadPartyFromCore: g_parsed_pokemon_cls is NULL!");
+        return NULL;
+    }
 
     size_t ewram_sz = 0;
     uint8_t* ewram = libretro_host_get_ewram(&ewram_sz);
@@ -328,8 +351,10 @@ Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobj
     jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
     for (uint8_t i = 0; i < count; i++) {
         jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
-        (*env)->SetObjectArrayElement(env, array, i, p_obj);
-        (*env)->DeleteLocalRef(env, p_obj);
+        if (p_obj) {
+            (*env)->SetObjectArrayElement(env, array, i, p_obj);
+            (*env)->DeleteLocalRef(env, p_obj);
+        }
     }
 
     return array;

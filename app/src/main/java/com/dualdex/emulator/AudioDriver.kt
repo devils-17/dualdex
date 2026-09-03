@@ -15,8 +15,16 @@ class AudioDriver(private val sampleRate: Int = 32768) {
         if (isRunning) return
 
         try {
+            val effectiveRate = if (AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT) > 0) {
+                sampleRate
+            } else if (AudioTrack.getMinBufferSize(44100, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT) > 0) {
+                44100
+            } else {
+                48000
+            }
+
             val minBufferSize = AudioTrack.getMinBufferSize(
-                sampleRate,
+                effectiveRate,
                 AudioFormat.CHANNEL_OUT_STEREO,
                 AudioFormat.ENCODING_PCM_16BIT
             )
@@ -32,7 +40,7 @@ class AudioDriver(private val sampleRate: Int = 32768) {
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
+                        .setSampleRate(effectiveRate)
                         .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                         .build()
                 )
