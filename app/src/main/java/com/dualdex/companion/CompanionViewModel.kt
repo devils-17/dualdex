@@ -1,0 +1,90 @@
+package com.dualdex.companion
+
+import com.dualdex.emulator.LibretroHost
+import com.dualdex.pokemon.ParsedPokemon
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+enum class CompanionTab(val title: String, val iconEmoji: String) {
+    PARTY("Party", "👥"),
+    CALC("Calc", "⚔️"),
+    TYPES("Types", "🛡️"),
+    ASSISTANT("Assistant", "🤖")
+}
+
+class CompanionViewModel(
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+) {
+    private val _selectedTab = MutableStateFlow(CompanionTab.PARTY)
+    val selectedTab: StateFlow<CompanionTab> = _selectedTab.asStateFlow()
+
+    private val _playerParty = MutableStateFlow<List<ParsedPokemon>>(emptyList())
+    val playerParty: StateFlow<List<ParsedPokemon>> = _playerParty.asStateFlow()
+
+    private val _enemyParty = MutableStateFlow<List<ParsedPokemon>>(emptyList())
+    val enemyParty: StateFlow<List<ParsedPokemon>> = _enemyParty.asStateFlow()
+
+    private val _selectedMemberIndex = MutableStateFlow(0)
+    val selectedMemberIndex: StateFlow<Int> = _selectedMemberIndex.asStateFlow()
+
+    private val _isInBattle = MutableStateFlow(false)
+    val isInBattle: StateFlow<Boolean> = _isInBattle.asStateFlow()
+
+    private val _activeGameId = MutableStateFlow(0)
+    val activeGameId: StateFlow<Int> = _activeGameId.asStateFlow()
+
+    private val _activeRomTitle = MutableStateFlow("")
+    val activeRomTitle: StateFlow<String> = _activeRomTitle.asStateFlow()
+
+    private var pollingJob: Job? = null
+
+    fun selectTab(tab: CompanionTab) {
+        _selectedTab.value = tab
+    }
+
+    fun selectMember(index: Int) {
+        if (index in 0..5) {
+            _selectedMemberIndex.value = index
+        }
+    }
+
+    fun setRomInfo(gameId: Int, romTitle: String) {
+        _activeGameId.value = gameId
+        _activeRomTitle.value = romTitle
+    }
+
+    fun startPolling(intervalMs: Long = 100L) {
+        if (pollingJob?.isActive == true) return
+
+        pollingJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val gameId = _activeGameId.value
+                    val playerList = LibretroHost.nativeReadPartyFromCore(gameId).filter { !it.isEmpty && it.isValid }
+                    if (playerList.isNotEmpty() || _playerParty.value.isNotEmpty()) {
+                        _playerParty.value = playerList
+                    }
+
+                    // Opponent / In-Battle reading
+                    val enemyList = LibretroHost.nativeReadPartyFromCore(gameId).filter { !it.isEmpty && it.isValid }
+                    _enemyParty.value = enemyList
+                    _isInBattle.value = enemyList.isNotEmpty()
+                } catch (e: Exception) {
+                    // Suppress during core startup/shutdown
+                }
+                delay(intervalMs)
+            }
+        }
+    }
+
+    fun stopPolling() {
+        pollingJob?.cancel()
+        pollingJob = null
+    }
+
+    fun updateManualParty(party: List<ParsedPokemon>) {
+        _playerParty.value = party
+    }
+}
