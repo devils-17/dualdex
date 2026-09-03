@@ -20,6 +20,19 @@ class EmulatorSurfaceView @JvmOverloads constructor(
     private val pixelBuffer: ByteBuffer = ByteBuffer.allocateDirect(512 * 512 * 4).order(ByteOrder.nativeOrder())
     private val frameMetadata = IntArray(4) // width, height, pitch, pixelFormat
     private var textureId: Int = 0
+    private var isTextureAllocated = false
+    private var lastAllocatedWidth = 0
+    private var lastAllocatedHeight = 0
+
+    @Volatile
+    private var speedMultiplier: Int = 1
+
+    @Volatile
+    private var currentFilter: ShaderFilter = ShaderFilter.NEAREST
+    private var activeProgram: Int = 0
+
+    // Shader programs map
+    private val programMap = mutableMapOf<ShaderFilter, Int>()
 
     private val vertexShaderCode = """
         attribute vec4 aPosition;
@@ -31,7 +44,7 @@ class EmulatorSurfaceView @JvmOverloads constructor(
         }
     """.trimIndent()
 
-    private val fragmentShaderCode = """
+    private val nearestFragmentShader = """
         precision mediump float;
         varying vec2 vTexCoord;
         uniform sampler2D uTexture;
@@ -40,10 +53,50 @@ class EmulatorSurfaceView @JvmOverloads constructor(
         }
     """.trimIndent()
 
-    private var program: Int = 0
-    private var positionHandle: Int = 0
-    private var texCoordHandle: Int = 0
-    private var textureHandle: Int = 0
+    private val sharpBilinearFragmentShader = """
+        precision mediump float;
+        varying vec2 vTexCoord;
+        uniform sampler2D uTexture;
+        uniform vec2 uTextureSize;
+        void main() {
+            vec2 texel = vTexCoord * uTextureSize;
+            vec2 texelFloor = floor(texel);
+            vec2 texelFract = fract(texel);
+            // Sharp clamping factor
+            vec2 sharpFract = clamp((texelFract - 0.5) * 4.0 + 0.5, 0.0, 1.0);
+            vec2 coord = (texelFloor + sharpFract) / uTextureSize;
+            gl_FragColor = texture2D(uTexture, coord);
+        }
+    """.trimIndent()
+
+    private val lcdGridFragmentShader = """
+        precision mediump float;
+        varying vec2 vTexCoord;
+        uniform sampler2D uTexture;
+        uniform vec2 uTextureSize;
+        void main() {
+            vec4 color = texture2D(uTexture, vTexCoord);
+            vec2 grid = fract(vTexCoord * uTextureSize);
+            float border = 1.0;
+            if (grid.x < 0.08 || grid.x > 0.92 || grid.y < 0.08 || grid.y > 0.92) {
+                border = 0.82;
+            }
+            gl_FragColor = vec4(color.rgb * border, color.a);
+        }
+    """.trimIndent()
+
+    private val crtScanlineFragmentShader = """
+        precision mediump float;
+        varying vec2 vTexCoord;
+        uniform sampler2D uTexture;
+        uniform vec2 uTextureSize;
+        void main() {
+            vec4 color = texture2D(uTexture, vTexCoord);
+            float scanline = sin(vTexCoord.y * 3.14159265 * 320.0);
+            scanline = 0.88 + 0.12 * scanline * scanline;
+            gl_FragColor = vec4(color.rgb * scanline, color.a);
+        }
+    """.trimIndent()
 
     private val vertexBuffer: FloatBuffer
     private val texCoordBuffer: FloatBuffer
@@ -55,9 +108,7 @@ class EmulatorSurfaceView @JvmOverloads constructor(
         isFocusable = true
         isFocusableInTouchMode = true
 
-        // Quad vertices for 3:2 aspect ratio in normalized device coordinates
-        // Top screen is 1920x1080 (16:9). To keep GBA 3:2:
-        // Width factor: (3/2) / (16/9) = 1.5 / 1.777 = ~0.84375
+        // 3:2 aspect ratio scaling for AYN Thor 16:9 top display (1920x1080)
         val aspectScaleX = 0.84375f
         val quadVertices = floatArrayOf(
             -aspectScaleX, -1.0f,
@@ -73,7 +124,6 @@ class EmulatorSurfaceView @JvmOverloads constructor(
                 position(0)
             }
 
-        // Texture coordinates (Y flipped for OpenGL)
         val texCoords = floatArrayOf(
             0.0f, 1.0f,
             1.0f, 1.0f,
@@ -89,13 +139,32 @@ class EmulatorSurfaceView @JvmOverloads constructor(
             }
     }
 
+    fun setShaderFilter(filter: ShaderFilter) {
+        currentFilter = filter
+    }
+
+    fun setSpeedMultiplier(multiplier: Int) {
+        speedMultiplier = when {
+            multiplier in 1..8 -> multiplier
+            multiplier > 8 -> 8
+            else -> 1
+        }
+    }
+
+    fun getSpeedMultiplier(): Int = speedMultiplier
+
+    fun toggleFastForward() {
+        speedMultiplier = if (speedMultiplier == 1) 2 else if (speedMultiplier == 2) 4 else 1
+    }
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
 
-        program = createProgram(vertexShaderCode, fragmentShaderCode)
-        positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
-        texCoordHandle = GLES20.glGetAttribLocation(program, "aTexCoord")
-        textureHandle = GLES20.glGetUniformLocation(program, "uTexture")
+        // Compile all filter shader programs
+        programMap[ShaderFilter.NEAREST] = createProgram(vertexShaderCode, nearestFragmentShader)
+        programMap[ShaderFilter.SHARP_BILINEAR] = createProgram(vertexShaderCode, sharpBilinearFragmentShader)
+        programMap[ShaderFilter.LCD_GRID] = createProgram(vertexShaderCode, lcdGridFragmentShader)
+        programMap[ShaderFilter.CRT_SCANLINE] = createProgram(vertexShaderCode, crtScanlineFragmentShader)
 
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
@@ -106,6 +175,8 @@ class EmulatorSurfaceView @JvmOverloads constructor(
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+
+        isTextureAllocated = false
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -115,8 +186,11 @@ class EmulatorSurfaceView @JvmOverloads constructor(
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // Step emulator by one frame
-        LibretroHost.nativeStepFrame()
+        // Fast-Forward emulation steps
+        val steps = speedMultiplier
+        for (i in 0 until steps) {
+            LibretroHost.nativeStepFrame()
+        }
 
         // Fetch latest frame pixels
         pixelBuffer.position(0)
@@ -130,39 +204,54 @@ class EmulatorSurfaceView @JvmOverloads constructor(
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
             pixelBuffer.position(0)
 
-            if (pixelFormat == 2) {
-                // RGB565
+            val glFormat = if (pixelFormat == 2) GLES20.GL_RGB else GLES20.GL_RGBA
+            val glType = if (pixelFormat == 2) GLES20.GL_UNSIGNED_SHORT_5_6_5 else GLES20.GL_UNSIGNED_BYTE
+
+            if (!isTextureAllocated || lastAllocatedWidth != width || lastAllocatedHeight != height) {
+                // Initial texture allocation
                 GLES20.glTexImage2D(
-                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGB,
+                    GLES20.GL_TEXTURE_2D, 0, glFormat,
                     width, height, 0,
-                    GLES20.GL_RGB, GLES20.GL_UNSIGNED_SHORT_5_6_5, pixelBuffer
+                    glFormat, glType, pixelBuffer
                 )
+                isTextureAllocated = true
+                lastAllocatedWidth = width
+                lastAllocatedHeight = height
             } else {
-                // RGBA
-                GLES20.glTexImage2D(
-                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
-                    width, height, 0,
-                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixelBuffer
+                // High-performance zero-reallocation subimage update
+                GLES20.glTexSubImage2D(
+                    GLES20.GL_TEXTURE_2D, 0, 0, 0,
+                    width, height, glFormat, glType, pixelBuffer
                 )
             }
         }
 
-        // Draw quad
-        GLES20.glUseProgram(program)
+        // Render with active shader filter
+        activeProgram = programMap[currentFilter] ?: programMap[ShaderFilter.NEAREST]!!
+        GLES20.glUseProgram(activeProgram)
 
-        GLES20.glEnableVertexAttribArray(positionHandle)
-        GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+        val posHandle = GLES20.glGetAttribLocation(activeProgram, "aPosition")
+        val texCoordHandle = GLES20.glGetAttribLocation(activeProgram, "aTexCoord")
+        val texHandle = GLES20.glGetUniformLocation(activeProgram, "uTexture")
+        val sizeHandle = GLES20.glGetUniformLocation(activeProgram, "uTextureSize")
+
+        if (sizeHandle != -1 && frameMetadata[0] > 0 && frameMetadata[1] > 0) {
+            GLES20.glUniform2f(sizeHandle, frameMetadata[0].toFloat(), frameMetadata[1].toFloat())
+        }
+
+        GLES20.glEnableVertexAttribArray(posHandle)
+        GLES20.glVertexAttribPointer(posHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
 
         GLES20.glEnableVertexAttribArray(texCoordHandle)
         GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
-        GLES20.glUniform1i(textureHandle, 0)
+        GLES20.glUniform1i(texHandle, 0)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
-        GLES20.glDisableVertexAttribArray(positionHandle)
+        GLES20.glDisableVertexAttribArray(posHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
     }
 

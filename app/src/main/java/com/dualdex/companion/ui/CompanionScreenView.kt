@@ -12,11 +12,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.dualdex.companion.CompanionTab
 import com.dualdex.companion.CompanionViewModel
+import com.dualdex.emulator.ShaderFilter
 
 class CompanionScreenView(
     context: Context,
     private val viewModel: CompanionViewModel,
-    private val onOpenRomRequested: (() -> Unit)? = null
+    private val onOpenRomRequested: (() -> Unit)? = null,
+    private val onShaderChanged: ((ShaderFilter) -> Unit)? = null,
+    private val onSpeedChanged: ((Int) -> Unit)? = null
 ) : LinearLayout(context) {
 
     private val contentContainer: FrameLayout
@@ -30,6 +33,7 @@ class CompanionScreenView(
     private val docsView: DocsScreenView by lazy { DocsScreenView(context, viewModel) }
     private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel) }
     private val assistantView: com.dualdex.assistant.AssistantScreenView by lazy { com.dualdex.assistant.AssistantScreenView(context, viewModel) }
+    private val settingsView: SettingsScreenView by lazy { SettingsScreenView(context, viewModel, onShaderChanged, onSpeedChanged) }
 
     init {
         orientation = VERTICAL
@@ -148,6 +152,7 @@ class CompanionScreenView(
                 savesView
             }
             CompanionTab.ASSISTANT -> assistantView
+            CompanionTab.SETTINGS -> settingsView
         }
         contentContainer.addView(activeView)
 

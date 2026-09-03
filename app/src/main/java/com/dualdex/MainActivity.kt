@@ -19,6 +19,7 @@ import com.dualdex.emulator.AudioDriver
 import com.dualdex.emulator.EmulatorSurfaceView
 import com.dualdex.emulator.LibretroHost
 import com.dualdex.emulator.SaveStateManager
+import com.dualdex.emulator.ShaderFilter
 import com.dualdex.romhack.ProfileLoader
 import com.dualdex.romhack.RomHackDetector
 import com.dualdex.romhack.RomHackProfile
@@ -146,9 +147,13 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
             }
             splitLayout.addView(emulatorView)
 
-            val companionView = CompanionScreenView(this, viewModel) {
-                openRomLauncher.launch(arrayOf("*/*"))
-            }.apply {
+            val companionView = CompanionScreenView(
+                context = this,
+                viewModel = viewModel,
+                onOpenRomRequested = { openRomLauncher.launch(arrayOf("*/*")) },
+                onShaderChanged = { filter: ShaderFilter -> emulatorView?.setShaderFilter(filter) },
+                onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) }
+            ).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     0,
@@ -163,9 +168,14 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     private fun showPresentation(display: Display) {
         companionPresentation?.dismiss()
-        companionPresentation = CompanionPresentation(this, display, viewModel) {
-            openRomLauncher.launch(arrayOf("*/*"))
-        }.apply {
+        companionPresentation = CompanionPresentation(
+            context = this,
+            display = display,
+            viewModel = viewModel,
+            onOpenRomRequested = { openRomLauncher.launch(arrayOf("*/*")) },
+            onShaderChanged = { filter: ShaderFilter -> emulatorView?.setShaderFilter(filter) },
+            onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) }
+        ).apply {
             show()
         }
     }
