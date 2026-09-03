@@ -1,4 +1,0 @@
-/home/dq/Android/Sdk/cmake/3.22.1/bin/ninja \
-  -C \
-  /home/dq/Projects/dualdex/app/.cxx/Debug/5nyxz4f3/x86_64 \
-  dualdex_native
