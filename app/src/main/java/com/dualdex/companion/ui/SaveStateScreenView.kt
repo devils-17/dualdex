@@ -1,0 +1,222 @@
+package com.dualdex.companion.ui
+
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.widget.*
+import com.dualdex.companion.CompanionViewModel
+import com.dualdex.emulator.SaveStateManager
+
+class SaveStateScreenView(
+    context: Context,
+    private val viewModel: CompanionViewModel
+) : LinearLayout(context) {
+
+    private val saveStateManager = SaveStateManager(context)
+    private val slotsContainer: LinearLayout
+    private val quickSaveStatusView: TextView
+
+    init {
+        orientation = VERTICAL
+        setBackgroundColor(0xFF121216.toInt())
+        setPadding(24, 24, 24, 24)
+
+        val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = true }
+        val content = LinearLayout(context).apply { orientation = VERTICAL }
+        scroll.addView(content)
+        addView(scroll)
+
+        // Title
+        val titleView = TextView(context).apply {
+            text = "💾 Save State Manager"
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 0, 16)
+        }
+        content.addView(titleView)
+
+        // Quick Save / Load Card
+        val quickCard = createCardLayout().apply {
+            val label = TextView(context).apply {
+                text = "Quick Save & Quick Load"
+                setTextColor(0xFFFFD700.toInt())
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, 8)
+            }
+            addView(label)
+
+            val btnRow = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                setPadding(0, 8, 0, 8)
+            }
+
+            val qSaveBtn = Button(context).apply {
+                text = "⚡ Quick Save"
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                background = GradientDrawable().apply {
+                    cornerRadius = 16f
+                    setColor(0xFF2E6B4A.toInt())
+                }
+                setPadding(20, 10, 20, 10)
+                setOnClickListener {
+                    val key = getGameKey()
+                    val ok = saveStateManager.quickSave(key)
+                    Toast.makeText(context, if (ok) "Quick state saved!" else "Save failed!", Toast.LENGTH_SHORT).show()
+                    refreshUI()
+                }
+            }
+            val lp1 = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f).apply { setMargins(0, 0, 8, 0) }
+            btnRow.addView(qSaveBtn, lp1)
+
+            val qLoadBtn = Button(context).apply {
+                text = "📂 Quick Load"
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                background = GradientDrawable().apply {
+                    cornerRadius = 16f
+                    setColor(0xFF2B4A77.toInt())
+                }
+                setPadding(20, 10, 20, 10)
+                setOnClickListener {
+                    val key = getGameKey()
+                    val ok = saveStateManager.quickLoad(key)
+                    Toast.makeText(context, if (ok) "Quick state loaded!" else "No quick save found!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            val lp2 = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f).apply { setMargins(8, 0, 0, 0) }
+            btnRow.addView(qLoadBtn, lp2)
+
+            addView(btnRow)
+
+            quickSaveStatusView = TextView(context).apply {
+                setTextColor(0xFFAAAAAA.toInt())
+                textSize = 12f
+                setPadding(0, 4, 0, 0)
+            }
+            addView(quickSaveStatusView)
+        }
+        content.addView(quickCard)
+
+        // Slots Card
+        val slotsCard = createCardLayout().apply {
+            val label = TextView(context).apply {
+                text = "Save Slots (1 - 5)"
+                setTextColor(0xFF4A9EFF.toInt())
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, 12)
+            }
+            addView(label)
+
+            slotsContainer = LinearLayout(context).apply {
+                orientation = VERTICAL
+            }
+            addView(slotsContainer)
+        }
+        content.addView(slotsCard)
+
+        refreshUI()
+    }
+
+    private fun getGameKey(): String {
+        return viewModel.activeRomTitle.value.ifEmpty { "default_game" }
+    }
+
+    fun refreshUI() {
+        val gameKey = getGameKey()
+        val qFile = saveStateManager.getQuickSaveFilePath(gameKey)
+        quickSaveStatusView.text = if (qFile.exists()) {
+            "Latest Quick Save: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(qFile.lastModified()))}"
+        } else {
+            "No Quick Save created yet."
+        }
+
+        slotsContainer.removeAllViews()
+        val slots = saveStateManager.getAllSlotsInfo(gameKey, 5)
+
+        slots.forEach { slot ->
+            val slotRow = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(12, 12, 12, 12)
+                background = GradientDrawable().apply {
+                    cornerRadius = 14f
+                    setColor(0xFF16161E.toInt())
+                }
+                layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, 0, 0, 10)
+                }
+            }
+
+            val slotText = TextView(context).apply {
+                val sizeStr = if (slot.exists) " (${slot.sizeBytes / 1024} KB)" else ""
+                text = "Slot ${slot.slotIndex}: ${slot.formattedDate}$sizeStr"
+                setTextColor(if (slot.exists) Color.WHITE else 0xFF777788.toInt())
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+            slotRow.addView(slotText)
+
+            val saveBtn = Button(context).apply {
+                text = "Save"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                background = GradientDrawable().apply {
+                    cornerRadius = 10f
+                    setColor(0xFF2E6B4A.toInt())
+                }
+                setPadding(14, 4, 14, 4)
+                setOnClickListener {
+                    val ok = saveStateManager.saveSlot(gameKey, slot.slotIndex)
+                    Toast.makeText(context, if (ok) "Slot ${slot.slotIndex} saved!" else "Save failed!", Toast.LENGTH_SHORT).show()
+                    refreshUI()
+                }
+            }
+            val lpSave = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 8, 0)
+            }
+            slotRow.addView(saveBtn, lpSave)
+
+            val loadBtn = Button(context).apply {
+                text = "Load"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                isEnabled = slot.exists
+                background = GradientDrawable().apply {
+                    cornerRadius = 10f
+                    setColor(if (slot.exists) 0xFF2B4A77.toInt() else 0xFF222228.toInt())
+                }
+                setPadding(14, 4, 14, 4)
+                setOnClickListener {
+                    val ok = saveStateManager.loadSlot(gameKey, slot.slotIndex)
+                    Toast.makeText(context, if (ok) "Slot ${slot.slotIndex} loaded!" else "Load failed!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            slotRow.addView(loadBtn)
+
+            slotsContainer.addView(slotRow)
+        }
+    }
+
+    private fun createCardLayout(): LinearLayout {
+        return LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(20, 18, 20, 18)
+            background = GradientDrawable().apply {
+                cornerRadius = 20f
+                setColor(0xFF1E1E26.toInt())
+            }
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 0, 16)
+            }
+        }
+    }
+}

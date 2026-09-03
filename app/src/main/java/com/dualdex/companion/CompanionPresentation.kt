@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.collectLatest
 class CompanionPresentation(
     context: Context,
     display: Display,
-    private val viewModel: CompanionViewModel
+    private val viewModel: CompanionViewModel,
+    private val onOpenRomRequested: (() -> Unit)? = null
 ) : Presentation(context, display) {
 
     private var companionScreenView: CompanionScreenView? = null
@@ -21,7 +22,7 @@ class CompanionPresentation(
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val screen = CompanionScreenView(context, viewModel).apply {
+        val screen = CompanionScreenView(context, viewModel, onOpenRomRequested).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -34,6 +35,13 @@ class CompanionPresentation(
         presentationScope.launch {
             viewModel.playerParty.collectLatest {
                 companionScreenView?.notifyPartyUpdated()
+            }
+        }
+
+        // Observe profile changes
+        presentationScope.launch {
+            viewModel.activeProfile.collectLatest {
+                companionScreenView?.notifyProfileChanged()
             }
         }
     }

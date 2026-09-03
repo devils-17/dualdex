@@ -1,0 +1,23 @@
+{
+  "id": "ghost_grey",
+  "name": "Pokemon Ghost Grey",
+  "baseGame": "FireRed",
+  "gameId": 6,
+  "developer": "JoeyZeed",
+  "engine": "HexManiacAdvance",
+  "hasEvs": false,
+  "hasIvs": false,
+  "hasPhysSpecSplit": true,
+  "steelResistsGhostDark": true,
+  "cfruOffsets": false,
+  "playerPartyOffset": 33702532,
+  "enemyPartyOffset": 33701932,
+  "docsUrl": null,
+  "headerTitles": ["BPRE", "GHOSTGREY", "POKEMONGHOST"],
+  "sha256Hashes": [],
+  "customSpecies": {
+    "500": { "name": "Lichtoise", "type1": "Water", "type2": "Ghost", "hp": 79, "atk": 63, "def": 100, "spa": 85, "spd": 105, "spe": 78 },
+    "501": { "name": "Spectrasaur", "type1": "Grass", "type2": "Ghost", "hp": 80, "atk": 82, "def": 83, "spa": 100, "spd": 100, "spe": 80 },
+    "502": { "name": "Phantomander", "type1": "Fire", "type2": "Ghost", "hp": 78, "atk": 84, "def": 78, "spa": 109, "spd": 85, "spe": 100 }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "vanilla_emerald",
+  "name": "Pokemon Emerald",
+  "baseGame": "Emerald",
+  "gameId": 0,
+  "developer": "Game Freak",
+  "engine": "Vanilla",
+  "hasEvs": true,
+  "hasIvs": true,
+  "hasPhysSpecSplit": false,
+  "steelResistsGhostDark": true,
+  "cfruOffsets": false,
+  "playerPartyOffset": 33703148,
+  "enemyPartyOffset": 33703748,
+  "docsUrl": null,
+  "headerTitles": ["BPEE", "POKEMON EMER"],
+  "sha256Hashes": [
+    "f3ae088681bfbfed0314f85243d1a2d376236f18e938ec9f270a834fb22c5409"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "vanilla_firered",
+  "name": "Pokemon FireRed",
+  "baseGame": "FireRed",
+  "gameId": 1,
+  "developer": "Game Freak",
+  "engine": "Vanilla",
+  "hasEvs": true,
+  "hasIvs": true,
+  "hasPhysSpecSplit": false,
+  "steelResistsGhostDark": true,
+  "cfruOffsets": false,
+  "playerPartyOffset": 33702532,
+  "enemyPartyOffset": 33701932,
+  "docsUrl": null,
+  "headerTitles": ["BPRE", "POKEMON FIRE"],
+  "sha256Hashes": [
+    "41cb23d8dccc8ebd7fe649618a31316863b305243f166c0f941a6b9670f958a3",
+    "dd5945db94be8075841e2d634304a24c9600a9fa9e9282367d5cf20d23c52e46"
+  ]
+}

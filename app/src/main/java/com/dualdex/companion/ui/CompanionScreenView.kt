@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -14,48 +15,71 @@ import com.dualdex.companion.CompanionViewModel
 
 class CompanionScreenView(
     context: Context,
-    private val viewModel: CompanionViewModel
+    private val viewModel: CompanionViewModel,
+    private val onOpenRomRequested: (() -> Unit)? = null
 ) : LinearLayout(context) {
 
     private val contentContainer: FrameLayout
     private val tabButtons = mutableMapOf<CompanionTab, TextView>()
+    private val profileLabel: TextView
+    private val battleBadge: TextView
 
     private val partyView: PartyScreenView by lazy { PartyScreenView(context, viewModel) }
     private val calcView: CalcTabScreenView by lazy { CalcTabScreenView(context, viewModel) }
     private val typesView: TypeChartScreenView by lazy { TypeChartScreenView(context) }
+    private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel) }
     private val assistantView: AssistantPlaceholderView by lazy { AssistantPlaceholderView(context, viewModel) }
 
     init {
         orientation = VERTICAL
         setBackgroundColor(0xFF101014.toInt())
 
-        // Top Status Header (ROM Name, DualDex Brand, Battle Status)
+        // Top Status Header (ROM Name, Open ROM button, Battle Status)
         val headerBar = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(24, 16, 24, 16)
+            setPadding(20, 14, 20, 14)
             setBackgroundColor(0xFF16161E.toInt())
         }
 
-        val brandLabel = TextView(context).apply {
-            text = "⚡ DualDex Companion"
+        profileLabel = TextView(context).apply {
+            val prof = viewModel.activeProfile.value
+            text = "⚡ ${prof.name}"
             setTextColor(0xFF4A9EFF.toInt())
-            textSize = 15f
+            textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
         }
-        headerBar.addView(brandLabel)
+        headerBar.addView(profileLabel)
 
         val spacer = View(context).apply {
             layoutParams = LayoutParams(0, 1, 1.0f)
         }
         headerBar.addView(spacer)
 
-        val battleBadge = TextView(context).apply {
+        if (onOpenRomRequested != null) {
+            val openRomBtn = Button(context).apply {
+                text = "📁 Open ROM"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                background = GradientDrawable().apply {
+                    cornerRadius = 10f
+                    setColor(0xFF2B3A55.toInt())
+                }
+                setPadding(12, 4, 12, 4)
+                setOnClickListener { onOpenRomRequested.invoke() }
+            }
+            val lpRom = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 10, 0)
+            }
+            headerBar.addView(openRomBtn, lpRom)
+        }
+
+        battleBadge = TextView(context).apply {
             text = "Ready"
             setTextColor(0xFF50C878.toInt())
-            textSize = 12f
+            textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(14, 4, 14, 4)
+            setPadding(12, 4, 12, 4)
             background = GradientDrawable().apply {
                 cornerRadius = 10f
                 setColor(0xFF1F2B24.toInt())
@@ -75,7 +99,7 @@ class CompanionScreenView(
         val navBar = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(8, 10, 8, 12)
+            setPadding(6, 8, 6, 10)
             setBackgroundColor(0xFF16161E.toInt())
         }
 
@@ -83,9 +107,9 @@ class CompanionScreenView(
             val tabBtn = TextView(context).apply {
                 text = "${tab.iconEmoji}\n${tab.title}"
                 gravity = Gravity.CENTER
-                textSize = 11f
+                textSize = 10.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(12, 6, 12, 6)
+                setPadding(8, 6, 8, 6)
                 layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
                 setOnClickListener {
                     viewModel.selectTab(tab)
@@ -114,6 +138,10 @@ class CompanionScreenView(
                 calcView
             }
             CompanionTab.TYPES -> typesView
+            CompanionTab.SAVES -> {
+                savesView.refreshUI()
+                savesView
+            }
             CompanionTab.ASSISTANT -> assistantView
         }
         contentContainer.addView(activeView)
@@ -130,8 +158,22 @@ class CompanionScreenView(
         }
     }
 
+    fun notifyProfileChanged() {
+        post {
+            val prof = viewModel.activeProfile.value
+            profileLabel.text = "⚡ ${prof.name}"
+            if (viewModel.selectedTab.value == CompanionTab.PARTY) partyView.refreshUI()
+            if (viewModel.selectedTab.value == CompanionTab.CALC) calcView.refreshUI()
+            if (viewModel.selectedTab.value == CompanionTab.SAVES) savesView.refreshUI()
+        }
+    }
+
     fun notifyPartyUpdated() {
         post {
+            val inBattle = viewModel.isInBattle.value
+            battleBadge.text = if (inBattle) "⚔️ Battle" else "Ready"
+            battleBadge.setTextColor(if (inBattle) 0xFFFF6B6B.toInt() else 0xFF50C878.toInt())
+
             if (viewModel.selectedTab.value == CompanionTab.PARTY) {
                 partyView.refreshUI()
             } else if (viewModel.selectedTab.value == CompanionTab.CALC) {

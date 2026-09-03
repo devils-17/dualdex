@@ -2,6 +2,7 @@ package com.dualdex.companion
 
 import com.dualdex.emulator.LibretroHost
 import com.dualdex.pokemon.ParsedPokemon
+import com.dualdex.romhack.RomHackProfile
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,6 +12,7 @@ enum class CompanionTab(val title: String, val iconEmoji: String) {
     PARTY("Party", "👥"),
     CALC("Calc", "⚔️"),
     TYPES("Types", "🛡️"),
+    SAVES("Saves", "💾"),
     ASSISTANT("Assistant", "🤖")
 }
 
@@ -38,6 +40,9 @@ class CompanionViewModel(
     private val _activeRomTitle = MutableStateFlow("")
     val activeRomTitle: StateFlow<String> = _activeRomTitle.asStateFlow()
 
+    private val _activeProfile = MutableStateFlow(RomHackProfile.DEFAULT_FIRERED)
+    val activeProfile: StateFlow<RomHackProfile> = _activeProfile.asStateFlow()
+
     private var pollingJob: Job? = null
 
     fun selectTab(tab: CompanionTab) {
@@ -50,9 +55,18 @@ class CompanionViewModel(
         }
     }
 
-    fun setRomInfo(gameId: Int, romTitle: String) {
+    fun setRomInfo(gameId: Int, romTitle: String, profile: RomHackProfile? = null) {
         _activeGameId.value = gameId
         _activeRomTitle.value = romTitle
+        if (profile != null) {
+            _activeProfile.value = profile
+        }
+    }
+
+    fun setProfile(profile: RomHackProfile) {
+        _activeProfile.value = profile
+        _activeGameId.value = profile.gameId
+        _activeRomTitle.value = profile.name
     }
 
     fun startPolling(intervalMs: Long = 100L) {
