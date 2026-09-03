@@ -4,6 +4,8 @@
 #include <android/log.h>
 #include "pokemon_reader.h"
 #include "pokemon_text.h"
+#include "libretro_host.h"
+#include "js_calc_engine.h"
 
 #define TAG "DualDex_JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -27,15 +29,15 @@ static void init_class_cache(JNIEnv* env) {
         env,
         g_parsed_pokemon_cls,
         "<init>",
-        "(ZZJII"                           // isValid, isEmpty, pid, tid, sid
-        "Ljava/lang/String;Ljava/lang/String;" // nickname, otName
-        "IIIII"                            // species, heldItem, level, nature, natureName... wait natureName is string
-        "Ljava/lang/String;"               // natureName
-        "ZIZJ"                             // isShiny, abilitySlot, isEgg, friendship, experience
-        "IIIIII"                           // hpIv, attackIv, defenseIv, speedIv, spAttackIv, spDefenseIv
-        "IIIIII"                           // hpEv, attackEv, defenseEv, speedEv, spAttackEv, spDefenseEv
-        "[I[I"                             // moves, pp
-        "IIIIIIJ)V"                        // currentHp, maxHp, attack, defense, speed, spAttack, spDefense, statusCondition
+        "(ZZJII"
+        "Ljava/lang/String;Ljava/lang/String;"
+        "IIIII"
+        "Ljava/lang/String;"
+        "ZIZJ"
+        "IIIIII"
+        "IIIIII"
+        "[I[I"
+        "IIIIIIJ)V"
     );
 
     if (!g_parsed_pokemon_ctor) {
@@ -53,13 +55,11 @@ static jobject create_parsed_pokemon_object(JNIEnv* env, const ParsedPokemon* p)
     jstring j_otname = (*env)->NewStringUTF(env, p->ot_name);
     jstring j_nature_name = (*env)->NewStringUTF(env, p->nature_name ? p->nature_name : "");
 
-    // Moves int array
     jintArray j_moves = (*env)->NewIntArray(env, 4);
     jint moves_buf[4];
     for (int i = 0; i < 4; i++) moves_buf[i] = p->moves[i];
     (*env)->SetIntArrayRegion(env, j_moves, 0, 4, moves_buf);
 
-    // PP int array
     jintArray j_pp = (*env)->NewIntArray(env, 4);
     jint pp_buf[4];
     for (int i = 0; i < 4; i++) pp_buf[i] = p->pp[i];
@@ -118,6 +118,10 @@ static jobject create_parsed_pokemon_object(JNIEnv* env, const ParsedPokemon* p)
 
     return obj;
 }
+
+// -------------------------------------------------------------
+// Pokemon Memory Reader JNI
+// -------------------------------------------------------------
 
 JNIEXPORT jint JNICALL
 Java_com_dualdex_pokemon_PokemonBridge_detectGame(JNIEnv* env, jobject thiz, jstring rom_title) {
@@ -216,4 +220,168 @@ Java_com_dualdex_pokemon_PokemonBridge_readEnemyParty(
     }
 
     return array;
+}
+
+// -------------------------------------------------------------
+// Libretro Emulator Host JNI
+// -------------------------------------------------------------
+
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeLoadCore(JNIEnv* env, jobject thiz, jstring core_path) {
+    (void)thiz;
+    if (!core_path) return JNI_FALSE;
+
+    const char* path_str = (*env)->GetStringUTFChars(env, core_path, NULL);
+    bool ok = libretro_host_init(path_str);
+    (*env)->ReleaseStringUTFChars(env, core_path, path_str);
+
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeLoadRom(JNIEnv* env, jobject thiz, jstring rom_path) {
+    (void)thiz;
+    if (!rom_path) return JNI_FALSE;
+
+    const char* path_str = (*env)->GetStringUTFChars(env, rom_path, NULL);
+    bool ok = libretro_host_load_rom(path_str);
+    (*env)->ReleaseStringUTFChars(env, rom_path, path_str);
+
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeStepFrame(JNIEnv* env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    libretro_host_step_frame();
+}
+
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeSetInputButtons(JNIEnv* env, jobject thiz, jint button_mask) {
+    (void)env;
+    (void)thiz;
+    libretro_host_set_input_buttons((uint32_t)button_mask);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeGetVideoFrame(
+    JNIEnv* env,
+    jobject thiz,
+    jobject direct_buffer,
+    jintArray out_metadata
+) {
+    (void)thiz;
+    EmulatorVideoFrame frame;
+    if (!libretro_host_get_video_frame(&frame) || !frame.pixels) {
+        return JNI_FALSE;
+    }
+
+    void* dst = (*env)->GetDirectBufferAddress(env, direct_buffer);
+    if (!dst) return JNI_FALSE;
+
+    memcpy(dst, frame.pixels, frame.pitch * frame.height);
+
+    if (out_metadata) {
+        jint meta[4] = {
+            (jint)frame.width,
+            (jint)frame.height,
+            (jint)frame.pitch,
+            (jint)frame.pixel_format
+        };
+        (*env)->SetIntArrayRegion(env, out_metadata, 0, 4, meta);
+    }
+
+    return JNI_TRUE;
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobject thiz, jint game_id) {
+    (void)thiz;
+    init_class_cache(env);
+
+    size_t ewram_sz = 0;
+    uint8_t* ewram = libretro_host_get_ewram(&ewram_sz);
+    if (!ewram || ewram_sz == 0) {
+        return (*env)->NewObjectArray(env, 0, g_parsed_pokemon_cls, NULL);
+    }
+
+    const GameMemoryConfig* cfg = pokemon_get_game_config((GbaGameId)game_id);
+    PartySnapshot snapshot;
+    uint8_t count = pokemon_read_player_party(ewram, ewram_sz, cfg, &snapshot);
+
+    jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
+    for (uint8_t i = 0; i < count; i++) {
+        jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
+        (*env)->SetObjectArrayElement(env, array, i, p_obj);
+        (*env)->DeleteLocalRef(env, p_obj);
+    }
+
+    return array;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeSaveState(JNIEnv* env, jobject thiz, jstring state_path) {
+    (void)thiz;
+    if (!state_path) return JNI_FALSE;
+    const char* path_str = (*env)->GetStringUTFChars(env, state_path, NULL);
+    bool ok = libretro_host_save_state(path_str);
+    (*env)->ReleaseStringUTFChars(env, state_path, path_str);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeLoadState(JNIEnv* env, jobject thiz, jstring state_path) {
+    (void)thiz;
+    if (!state_path) return JNI_FALSE;
+    const char* path_str = (*env)->GetStringUTFChars(env, state_path, NULL);
+    bool ok = libretro_host_load_state(path_str);
+    (*env)->ReleaseStringUTFChars(env, state_path, path_str);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeCleanup(JNIEnv* env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    libretro_host_cleanup();
+}
+
+// -------------------------------------------------------------
+// QuickJS Damage Calculator JNI
+// -------------------------------------------------------------
+
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_calculator_DamageCalculator_nativeInit(JNIEnv* env, jobject thiz, jstring bundle_js) {
+    (void)thiz;
+    if (!bundle_js) return JNI_FALSE;
+
+    const char* js_str = (*env)->GetStringUTFChars(env, bundle_js, NULL);
+    bool ok = js_calc_init(js_str);
+    (*env)->ReleaseStringUTFChars(env, bundle_js, js_str);
+
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_dualdex_calculator_DamageCalculator_nativeCalculate(JNIEnv* env, jobject thiz, jstring input_json) {
+    (void)thiz;
+    if (!input_json) return NULL;
+
+    const char* json_str = (*env)->GetStringUTFChars(env, input_json, NULL);
+    char* result_str = js_calc_calculate(json_str);
+    (*env)->ReleaseStringUTFChars(env, input_json, json_str);
+
+    if (!result_str) return NULL;
+
+    jstring j_out = (*env)->NewStringUTF(env, result_str);
+    free(result_str);
+    return j_out;
+}
+
+JNIEXPORT void JNICALL
+Java_com_dualdex_calculator_DamageCalculator_nativeCleanup(JNIEnv* env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    js_calc_cleanup();
 }

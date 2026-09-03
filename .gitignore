@@ -8,4 +8,9 @@ app/build/
 .externalNativeBuild
 .cxx
 test_runner
+calc_test_runner
+*.o
 *.apk
+cores/build-*
+cores/mgba-src/
+tools/calc-bundler/node_modules/

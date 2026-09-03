@@ -1,0 +1,173 @@
+package com.dualdex.calculator
+
+import android.content.Context
+import com.dualdex.pokemon.ParsedPokemon
+import org.json.JSONArray
+import org.json.JSONObject
+
+object DamageCalculator {
+
+    init {
+        System.loadLibrary("dualdex_native")
+    }
+
+    private var isInitialized = false
+
+    private external fun nativeInit(bundleJs: String): Boolean
+    private external fun nativeCalculate(inputJson: String): String?
+    private external fun nativeCleanup()
+
+    fun initialize(context: Context): Boolean {
+        if (isInitialized) return true
+
+        try {
+            val bundleJs = context.assets.open("calc_bundle.js").bufferedReader().use { it.readText() }
+            isInitialized = nativeInit(bundleJs)
+            return isInitialized
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return false
+        }
+    }
+
+    fun calculate(request: DamageCalculationRequest): DamageCalculationResponse {
+        val reqJson = JSONObject().apply {
+            put("gen", request.gen)
+
+            // Attacker
+            val atkObj = JSONObject().apply {
+                put("species", request.attacker.species)
+                put("level", request.attacker.level)
+                request.attacker.item?.let { put("item", it) }
+                request.attacker.nature?.let { put("nature", it) }
+                request.attacker.ability?.let { put("ability", it) }
+                request.attacker.curHP?.let { put("curHP", it) }
+                request.attacker.ivs?.let { ivs ->
+                    put("ivs", JSONObject().apply {
+                        put("hp", ivs.hp)
+                        put("atk", ivs.atk)
+                        put("def", ivs.def)
+                        put("spa", ivs.spa)
+                        put("spd", ivs.spd)
+                        put("spe", ivs.spe)
+                    })
+                }
+                request.attacker.evs?.let { evs ->
+                    put("evs", JSONObject().apply {
+                        put("hp", evs.hp)
+                        put("atk", evs.atk)
+                        put("def", evs.def)
+                        put("spa", evs.spa)
+                        put("spd", evs.spd)
+                        put("spe", evs.spe)
+                    })
+                }
+            }
+            put("attacker", atkObj)
+
+            // Defender
+            val defObj = JSONObject().apply {
+                put("species", request.defender.species)
+                put("level", request.defender.level)
+                request.defender.item?.let { put("item", it) }
+                request.defender.nature?.let { put("nature", it) }
+                request.defender.ability?.let { put("ability", it) }
+                request.defender.curHP?.let { put("curHP", it) }
+                request.defender.ivs?.let { ivs ->
+                    put("ivs", JSONObject().apply {
+                        put("hp", ivs.hp)
+                        put("atk", ivs.atk)
+                        put("def", ivs.def)
+                        put("spa", ivs.spa)
+                        put("spd", ivs.spd)
+                        put("spe", ivs.spe)
+                    })
+                }
+                request.defender.evs?.let { evs ->
+                    put("evs", JSONObject().apply {
+                        put("hp", evs.hp)
+                        put("atk", evs.atk)
+                        put("def", evs.def)
+                        put("spa", evs.spa)
+                        put("spd", evs.spd)
+                        put("spe", evs.spe)
+                    })
+                }
+            }
+            put("defender", defObj)
+
+            // Move
+            val moveObj = JSONObject().apply {
+                put("name", request.move.name)
+                put("isCrit", request.move.isCrit)
+            }
+            put("move", moveObj)
+
+            // Field
+            val fieldObj = JSONObject().apply {
+                put("gameType", request.field.gameType)
+                request.field.weather?.let { put("weather", it) }
+                request.field.terrain?.let { put("terrain", it) }
+            }
+            put("field", fieldObj)
+        }
+
+        val resJsonStr = nativeCalculate(reqJson.toString())
+            ?: return DamageCalculationResponse(success = false, error = "Native calculation returned null")
+
+        val resObj = JSONObject(resJsonStr)
+        val success = resObj.optBoolean("success", false)
+        if (!success) {
+            return DamageCalculationResponse(
+                success = false,
+                error = resObj.optString("error", "Unknown error")
+            )
+        }
+
+        val rangeArray = resObj.optJSONArray("range") ?: JSONArray()
+        val rangeList = mutableListOf<Int>()
+        for (i in 0 until rangeArray.length()) {
+            rangeList.add(rangeArray.getInt(i))
+        }
+
+        return DamageCalculationResponse(
+            success = true,
+            minDamage = resObj.optInt("minDamage", 0),
+            maxDamage = resObj.optInt("maxDamage", 0),
+            range = rangeList,
+            desc = resObj.optString("desc", ""),
+            moveName = resObj.optString("moveName", ""),
+            moveCategory = resObj.optString("moveCategory", ""),
+            moveType = resObj.optString("moveType", ""),
+            movePower = resObj.optInt("movePower", 0),
+            attackerName = resObj.optString("attackerName", ""),
+            defenderName = resObj.optString("defenderName", ""),
+            defenderMaxHP = resObj.optInt("defenderMaxHP", 0),
+            koChanceText = resObj.optString("koChanceText", "")
+        )
+    }
+
+    fun calculateFromParsed(
+        attacker: ParsedPokemon,
+        defenderSpecies: String,
+        moveName: String,
+        gen: Int = 3
+    ): DamageCalculationResponse {
+        val req = DamageCalculationRequest(
+            gen = gen,
+            attacker = CalcPokemonInput(
+                species = attacker.nickname.ifEmpty { "Bulbasaur" },
+                level = attacker.level,
+                nature = attacker.natureName,
+                ivs = StatBlock(attacker.hpIv, attacker.attackIv, attacker.defenseIv, attacker.spAttackIv, attacker.spDefenseIv, attacker.speedIv),
+                evs = StatBlock(attacker.hpEv, attacker.attackEv, attacker.defenseEv, attacker.spAttackEv, attacker.spDefenseEv, attacker.speedEv)
+            ),
+            defender = CalcPokemonInput(
+                species = defenderSpecies,
+                level = attacker.level
+            ),
+            move = CalcMoveInput(name = moveName)
+        )
+        return calculate(req)
+    }
+}

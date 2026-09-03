@@ -1,0 +1,92 @@
+#ifndef DUALDEX_LIBRETRO_HOST_H
+#define DUALDEX_LIBRETRO_HOST_H
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Controller button bitmasks matching GBA + AYN Thor layout
+#define DUALDEX_BTN_B         (1 << 0)
+#define DUALDEX_BTN_Y         (1 << 1)
+#define DUALDEX_BTN_SELECT    (1 << 2)
+#define DUALDEX_BTN_START     (1 << 3)
+#define DUALDEX_BTN_UP        (1 << 4)
+#define DUALDEX_BTN_DOWN      (1 << 5)
+#define DUALDEX_BTN_LEFT      (1 << 6)
+#define DUALDEX_BTN_RIGHT     (1 << 7)
+#define DUALDEX_BTN_A         (1 << 8)
+#define DUALDEX_BTN_X         (1 << 9)
+#define DUALDEX_BTN_L         (1 << 10)
+#define DUALDEX_BTN_R         (1 << 11)
+#define DUALDEX_BTN_L2        (1 << 12)
+#define DUALDEX_BTN_R2        (1 << 13)
+
+typedef struct {
+    unsigned int width;
+    unsigned int height;
+    int          pixel_format; // 0=0RGB1555, 1=XRGB8888, 2=RGB565
+    const void*  pixels;
+    size_t       pitch;
+} EmulatorVideoFrame;
+
+typedef struct {
+    bool   is_loaded;
+    char   rom_title[17];
+    double target_fps;
+    double sample_rate;
+} EmulatorCoreStatus;
+
+/**
+ * Initialize the Libretro host and load the core from shared library path (e.g. mgba_libretro.so).
+ */
+bool libretro_host_init(const char* core_lib_path);
+
+/**
+ * Load a ROM file into the emulator core.
+ */
+bool libretro_host_load_rom(const char* rom_file_path);
+
+/**
+ * Run a single frame of emulation (calls retro_run).
+ */
+void libretro_host_step_frame(void);
+
+/**
+ * Get pointer to the most recent video frame buffer.
+ */
+bool libretro_host_get_video_frame(EmulatorVideoFrame* out_frame);
+
+/**
+ * Set the current controller button state bitmask.
+ */
+void libretro_host_set_input_buttons(uint32_t button_mask);
+
+/**
+ * Get a direct pointer to the 256 KB EWRAM memory block for zero-copy Pokemon parsing.
+ */
+uint8_t* libretro_host_get_ewram(size_t* out_size);
+
+/**
+ * Save state to file.
+ */
+bool libretro_host_save_state(const char* save_state_path);
+
+/**
+ * Load state from file.
+ */
+bool libretro_host_load_state(const char* save_state_path);
+
+/**
+ * Unload ROM and core.
+ */
+void libretro_host_cleanup(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // DUALDEX_LIBRETRO_HOST_H
