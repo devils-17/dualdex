@@ -1,0 +1,373 @@
+#include "pokemon_reader.h"
+#include "pokemon_text.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+
+#define ANSI_GREEN "\033[0;32m"
+#define ANSI_RED   "\033[0;31m"
+#define ANSI_RESET "\033[0m"
+
+static int g_tests_passed = 0;
+static int g_tests_failed = 0;
+
+#define TEST_ASSERT(cond, msg) do { \
+    if (!(cond)) { \
+        printf(ANSI_RED "  [FAIL] %s: line %d (%s)" ANSI_RESET "\n", msg, __LINE__, #cond); \
+        g_tests_failed++; \
+        return; \
+    } \
+} while (0)
+
+// Helper: Encrypt 48 bytes of substructures and compute checksum
+static void pack_and_encrypt(
+    uint32_t pid,
+    uint32_t otid,
+    const uint8_t* g_block,
+    const uint8_t* a_block,
+    const uint8_t* e_block,
+    const uint8_t* m_block,
+    uint8_t* out_encrypted,
+    uint16_t* out_checksum
+) {
+    uint32_t order = pid % 24;
+    // Map of GAEM blocks into 4 slots
+    static const char* const ORDERS[24] = {
+        "GAEM", "GAME", "GEAM", "GEMA", "GMAE", "GMEA",
+        "AGEM", "AGME", "AEGM", "AEMG", "AMGE", "AMEG",
+        "EGAM", "EGMA", "EAGM", "EAMG", "EMGA", "EMAG",
+        "MGAE", "MGEA", "MAGE", "MAEG", "MEGA", "MEAG"
+    };
+
+    uint8_t plain[48];
+    const char* o = ORDERS[order];
+    for (int slot = 0; slot < 4; slot++) {
+        const uint8_t* src = NULL;
+        switch (o[slot]) {
+            case 'G': src = g_block; break;
+            case 'A': src = a_block; break;
+            case 'E': src = e_block; break;
+            case 'M': src = m_block; break;
+        }
+        memcpy(plain + (slot * 12), src, 12);
+    }
+
+    // 16-bit Checksum over 24 half-words
+    uint16_t sum = 0;
+    const uint16_t* hwords = (const uint16_t*)plain;
+    for (int i = 0; i < 24; i++) {
+        sum += hwords[i];
+    }
+    *out_checksum = sum;
+
+    // XOR encrypt with key = pid ^ otid
+    uint32_t key = pid ^ otid;
+    const uint32_t* pwords = (const uint32_t*)plain;
+    uint32_t* ewords = (uint32_t*)out_encrypted;
+    for (int i = 0; i < 12; i++) {
+        ewords[i] = pwords[i] ^ key;
+    }
+}
+
+static void test_text_decoding(void) {
+    printf("Running test_text_decoding...\n");
+
+    // Gen 3 encoding for "PIKA" + terminator
+    // P = 0xCA, I = 0xC3, K = 0xC5, A = 0xBB, 0xFF = end
+    uint8_t raw_pika[5] = {0xCA, 0xC3, 0xC5, 0xBB, 0xFF};
+    char decoded[32];
+    size_t len = pokemon_decode_string(raw_pika, sizeof(raw_pika), decoded, sizeof(decoded));
+
+    TEST_ASSERT(len == 4, "Decoded string length mismatch");
+    TEST_ASSERT(strcmp(decoded, "PIKA") == 0, "Decoded content mismatch for PIKA");
+
+    // Test numbers, punctuation and special symbols
+    // '0' = 0xA1, '9' = 0xAA, '!' = 0xAB, '?' = 0xAC, space = 0x00, male = 0xB5
+    uint8_t raw_symbols[] = {0xA1, 0xAA, 0x00, 0xAB, 0xAC, 0xB5, 0xFF};
+    pokemon_decode_string(raw_symbols, sizeof(raw_symbols), decoded, sizeof(decoded));
+    TEST_ASSERT(strstr(decoded, "09 !?♂") != NULL, "Special symbols and male icon decoded");
+
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_text_decoding" ANSI_RESET "\n");
+}
+
+static void test_single_pokemon_decryption(void) {
+    printf("Running test_single_pokemon_decryption...\n");
+
+    RawGbaPokemon raw;
+    memset(&raw, 0, sizeof(raw));
+
+    raw.pid = 0x87654321;
+    raw.otid = 0x12345678;
+
+    // Nickname: "TORCHIC" in Gen 3 encoding
+    // T=0xCE, O=0xC9, R=0xCC, C=0xBD, H=0xC2, I=0xC3, C=0xBD, 0xFF
+    uint8_t nick_encoded[10] = {0xCE, 0xC9, 0xCC, 0xBD, 0xC2, 0xC3, 0xBD, 0xFF, 0x00, 0x00};
+    memcpy(raw.nickname, nick_encoded, 10);
+
+    // Prepare substructures
+    SubstructGrowth g;
+    memset(&g, 0, sizeof(g));
+    g.species = 255; // Torchic
+    g.held_item = 15; // e.g. Oran Berry
+    g.experience = 125000;
+    g.friendship = 200;
+
+    SubstructAttacks a;
+    memset(&a, 0, sizeof(a));
+    a.moves[0] = 52;  // Ember
+    a.moves[1] = 10;  // Scratch
+    a.moves[2] = 28;  // Sand Attack
+    a.moves[3] = 45;  // Growl
+    a.pp[0] = 25; a.pp[1] = 35; a.pp[2] = 15; a.pp[3] = 40;
+
+    SubstructEVs e;
+    memset(&e, 0, sizeof(e));
+    e.hp_ev = 12;
+    e.attack_ev = 120;
+    e.defense_ev = 40;
+    e.speed_ev = 85;
+    e.sp_attack_ev = 50;
+    e.sp_defense_ev = 30;
+
+    SubstructMisc m;
+    memset(&m, 0, sizeof(m));
+    // IV bitfield: HP=31, Atk=28, Def=15, Spe=30, SpA=25, SpD=20, isEgg=0, ability=1
+    uint32_t ivs = (31 << 0) | (28 << 5) | (15 << 10) | (30 << 15) | (25 << 20) | (20 << 25) | (0 << 30) | (1U << 31);
+    m.iv_egg_ability = ivs;
+
+    // Encrypt
+    pack_and_encrypt(raw.pid, raw.otid,
+                     (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                     raw.raw_substructures, &raw.checksum);
+
+    // Battle stats
+    raw.level = 36;
+    raw.current_hp = 88;
+    raw.max_hp = 95;
+    raw.attack = 72;
+    raw.defense = 48;
+    raw.speed = 65;
+    raw.sp_attack = 55;
+    raw.sp_defense = 45;
+
+    // Parse
+    ParsedPokemon parsed;
+    bool ok = pokemon_parse_single((const uint8_t*)&raw, true, &parsed);
+
+    TEST_ASSERT(ok, "pokemon_parse_single should succeed");
+    TEST_ASSERT(parsed.is_valid, "parsed.is_valid should be true");
+    TEST_ASSERT(strcmp(parsed.nickname, "TORCHIC") == 0, "Nickname should match TORCHIC");
+    TEST_ASSERT(parsed.species == 255, "Species should be 255 (Torchic)");
+    TEST_ASSERT(parsed.held_item == 15, "Held item should be 15");
+    TEST_ASSERT(parsed.experience == 125000, "EXP should match");
+    TEST_ASSERT(parsed.friendship == 200, "Friendship should match");
+
+    TEST_ASSERT(parsed.moves[0] == 52 && parsed.pp[0] == 25, "Move 1 should be Ember (52)");
+    TEST_ASSERT(parsed.moves[1] == 10 && parsed.pp[1] == 35, "Move 2 should be Scratch (10)");
+
+    TEST_ASSERT(parsed.hp_ev == 12, "HP EV should be 12");
+    TEST_ASSERT(parsed.attack_ev == 120, "Atk EV should be 120");
+    TEST_ASSERT(parsed.speed_ev == 85, "Spe EV should be 85");
+
+    TEST_ASSERT(parsed.hp_iv == 31, "HP IV should be 31");
+    TEST_ASSERT(parsed.attack_iv == 28, "Atk IV should be 28");
+    TEST_ASSERT(parsed.defense_iv == 15, "Def IV should be 15");
+    TEST_ASSERT(parsed.speed_iv == 30, "Spe IV should be 30");
+    TEST_ASSERT(parsed.sp_attack_iv == 25, "SpA IV should be 25");
+    TEST_ASSERT(parsed.sp_defense_iv == 20, "SpD IV should be 20");
+    TEST_ASSERT(!parsed.is_egg, "is_egg should be false");
+    TEST_ASSERT(parsed.ability_slot == 1, "ability_slot should be 1");
+
+    TEST_ASSERT(parsed.level == 36, "Level should be 36");
+    TEST_ASSERT(parsed.current_hp == 88, "Current HP should be 88");
+    TEST_ASSERT(parsed.max_hp == 95, "Max HP should be 95");
+
+    uint8_t expected_nature = (uint8_t)(raw.pid % 25);
+    TEST_ASSERT(parsed.nature == expected_nature, "Nature index matches PID % 25");
+    TEST_ASSERT(strcmp(parsed.nature_name, pokemon_get_nature_name(expected_nature)) == 0, "Nature name matches");
+
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_single_pokemon_decryption" ANSI_RESET "\n");
+}
+
+static void test_all_substructure_orders(void) {
+    printf("Running test_all_substructure_orders (verifying all 24 permutations)...\n");
+
+    SubstructGrowth g = {.species = 384, .held_item = 0, .experience = 1000000, .friendship = 100};
+    SubstructAttacks a = {.moves = {1, 2, 3, 4}, .pp = {10, 20, 30, 40}};
+    SubstructEVs e = {.hp_ev = 10, .attack_ev = 20, .defense_ev = 30, .speed_ev = 40, .sp_attack_ev = 50, .sp_defense_ev = 60};
+    SubstructMisc m = {.iv_egg_ability = (31 << 0) | (31 << 5) | (31 << 10) | (31 << 15) | (31 << 20) | (31 << 25)};
+
+    // Loop through all 24 permutations (order 0 to 23)
+    for (uint32_t target_order = 0; target_order < 24; target_order++) {
+        RawGbaPokemon raw;
+        memset(&raw, 0, sizeof(raw));
+
+        // Ensure (pid % 24) == target_order
+        raw.pid = (100 * 24) + target_order;
+        raw.otid = 0x98765432;
+
+        pack_and_encrypt(raw.pid, raw.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         raw.raw_substructures, &raw.checksum);
+
+        ParsedPokemon parsed;
+        bool ok = pokemon_parse_single((const uint8_t*)&raw, false, &parsed);
+
+        char fail_msg[64];
+        snprintf(fail_msg, sizeof(fail_msg), "Permutation order %u failed", target_order);
+        TEST_ASSERT(ok, fail_msg);
+        TEST_ASSERT(parsed.species == 384, fail_msg);
+        TEST_ASSERT(parsed.moves[0] == 1 && parsed.moves[3] == 4, fail_msg);
+        TEST_ASSERT(parsed.hp_ev == 10 && parsed.sp_defense_ev == 60, fail_msg);
+        TEST_ASSERT(parsed.hp_iv == 31 && parsed.sp_defense_iv == 31, fail_msg);
+    }
+
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_all_substructure_orders (all 24 orders verified)" ANSI_RESET "\n");
+}
+
+static void test_checksum_corruption_detection(void) {
+    printf("Running test_checksum_corruption_detection...\n");
+
+    RawGbaPokemon raw;
+    memset(&raw, 0, sizeof(raw));
+    raw.pid = 0x11223344;
+    raw.otid = 0x55667788;
+
+    SubstructGrowth g = {.species = 1};
+    SubstructAttacks a = {0};
+    SubstructEVs e = {0};
+    SubstructMisc m = {0};
+
+    pack_and_encrypt(raw.pid, raw.otid,
+                     (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                     raw.raw_substructures, &raw.checksum);
+
+    // Corrupt one byte of encrypted data
+    raw.raw_substructures[7] ^= 0x01;
+
+    ParsedPokemon parsed;
+    bool ok = pokemon_parse_single((const uint8_t*)&raw, false, &parsed);
+
+    TEST_ASSERT(!ok, "Corrupted substructure must fail validation");
+    TEST_ASSERT(!parsed.is_valid, "is_valid must be false on corrupted checksum");
+
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_checksum_corruption_detection" ANSI_RESET "\n");
+}
+
+static void test_shininess_calculation(void) {
+    printf("Running test_shininess_calculation...\n");
+
+    // Shininess formula: ((TID ^ SID) ^ (PID_hi ^ PID_lo)) < 8
+    // Let TID = 0x1234, SID = 0x5678.
+    // TID ^ SID = 0x444C
+    // Choose PID_hi = 0x444C, PID_lo = 0x0000 -> (PID_hi ^ PID_lo) = 0x444C
+    // ((TID ^ SID) ^ (PID_hi ^ PID_lo)) = 0 < 8 -> SHINY!
+    uint32_t otid_shiny = (0x5678U << 16) | 0x1234U;
+    uint32_t pid_shiny  = (0x444CU << 16) | 0x0002U; // 0x444C ^ 0x0002 = 0x444E -> 0x444C ^ 0x444E = 2 < 8
+
+    RawGbaPokemon raw_s;
+    memset(&raw_s, 0, sizeof(raw_s));
+    raw_s.pid = pid_shiny;
+    raw_s.otid = otid_shiny;
+
+    SubstructGrowth g = {.species = 6};
+    SubstructAttacks a = {0};
+    SubstructEVs e = {0};
+    SubstructMisc m = {0};
+
+    pack_and_encrypt(raw_s.pid, raw_s.otid,
+                     (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                     raw_s.raw_substructures, &raw_s.checksum);
+
+    ParsedPokemon shiny_mon;
+    pokemon_parse_single((const uint8_t*)&raw_s, false, &shiny_mon);
+    TEST_ASSERT(shiny_mon.is_shiny == true, "Calculated Pokemon should be shiny");
+
+    // Non-shiny:
+    uint32_t pid_non_shiny = (0x1111U << 16) | 0x2222U;
+    raw_s.pid = pid_non_shiny;
+    pack_and_encrypt(raw_s.pid, raw_s.otid,
+                     (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                     raw_s.raw_substructures, &raw_s.checksum);
+
+    ParsedPokemon regular_mon;
+    pokemon_parse_single((const uint8_t*)&raw_s, false, &regular_mon);
+    TEST_ASSERT(regular_mon.is_shiny == false, "Calculated Pokemon should NOT be shiny");
+
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_shininess_calculation" ANSI_RESET "\n");
+}
+
+static void test_ewram_party_parsing(void) {
+    printf("Running test_ewram_party_parsing (mock 256KB EWRAM)...\n");
+
+    const size_t EWRAM_SIZE = 256 * 1024;
+    uint8_t* ewram = (uint8_t*)calloc(1, EWRAM_SIZE);
+    TEST_ASSERT(ewram != NULL, "Memory allocation for EWRAM failed");
+
+    const GameMemoryConfig* emerald_cfg = pokemon_get_game_config(GAME_EMERALD);
+    TEST_ASSERT(emerald_cfg != NULL, "Emerald config should exist");
+
+    // Set player party count to 3
+    ewram[emerald_cfg->player_party_count_offset] = 3;
+
+    // Create 3 Pokemon in party
+    for (int i = 0; i < 3; i++) {
+        RawGbaPokemon raw;
+        memset(&raw, 0, sizeof(raw));
+        raw.pid = 0x1000 + (i * 24);
+        raw.otid = 0x2000;
+        raw.level = 20 + (i * 5);
+
+        SubstructGrowth g = {.species = (uint16_t)(1 + i)}; // Bulbasaur, Ivysaur, Venusaur
+        SubstructAttacks a = {0};
+        SubstructEVs e = {.hp_ev = (uint8_t)(i * 10)};
+        SubstructMisc m = {.iv_egg_ability = 31};
+
+        pack_and_encrypt(raw.pid, raw.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         raw.raw_substructures, &raw.checksum);
+
+        uint8_t* slot = ewram + emerald_cfg->player_party_offset + (i * sizeof(RawGbaPokemon));
+        memcpy(slot, &raw, sizeof(RawGbaPokemon));
+    }
+
+    PartySnapshot snapshot;
+    uint8_t parsed_count = pokemon_read_player_party(ewram, EWRAM_SIZE, emerald_cfg, &snapshot);
+
+    TEST_ASSERT(parsed_count == 3, "Should have parsed 3 party Pokemon");
+    TEST_ASSERT(snapshot.count == 3, "Snapshot count should be 3");
+    TEST_ASSERT(snapshot.members[0].species == 1, "First member should be Bulbasaur (1)");
+    TEST_ASSERT(snapshot.members[1].species == 2, "Second member should be Ivysaur (2)");
+    TEST_ASSERT(snapshot.members[2].species == 3, "Third member should be Venusaur (3)");
+    TEST_ASSERT(snapshot.members[0].level == 20, "First member level should be 20");
+    TEST_ASSERT(snapshot.members[2].level == 30, "Third member level should be 30");
+
+    free(ewram);
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_ewram_party_parsing" ANSI_RESET "\n");
+}
+
+int main(void) {
+    printf("===================================================\n");
+    printf("   DualDex Gen 3 Memory Parser Test Suite\n");
+    printf("===================================================\n");
+
+    test_text_decoding();
+    test_single_pokemon_decryption();
+    test_all_substructure_orders();
+    test_checksum_corruption_detection();
+    test_shininess_calculation();
+    test_ewram_party_parsing();
+
+    printf("===================================================\n");
+    printf("Results: %d Passed, %d Failed\n", g_tests_passed, g_tests_failed);
+    printf("===================================================\n");
+
+    return (g_tests_failed == 0) ? 0 : 1;
+}

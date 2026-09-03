@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.DualDex" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:keepScreenOn">true</item>
+    </style>
+</resources>
