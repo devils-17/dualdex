@@ -15,6 +15,7 @@ import com.dualdex.calculator.DamageCalculator
 import com.dualdex.companion.CompanionPresentation
 import com.dualdex.companion.CompanionViewModel
 import com.dualdex.companion.ui.CompanionScreenView
+import com.dualdex.emulator.AudioDriver
 import com.dualdex.emulator.EmulatorSurfaceView
 import com.dualdex.emulator.LibretroHost
 import com.dualdex.emulator.SaveStateManager
@@ -31,6 +32,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
     private var companionPresentation: CompanionPresentation? = null
     private var displayManager: DisplayManager? = null
     private var loadedProfiles: List<RomHackProfile> = emptyList()
+    private val audioDriver = AudioDriver(32768)
 
     private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -53,6 +55,9 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
         if (File(corePath).exists()) {
             val loaded = LibretroHost.nativeLoadCore(corePath)
             Log.i("DualDex", "Loaded mGBA Libretro core: $loaded (path=$corePath)")
+            if (loaded) {
+                audioDriver.start()
+            }
         } else {
             Log.w("DualDex", "Core file not found at: $corePath")
         }
@@ -181,6 +186,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     override fun onPause() {
         super.onPause()
+        audioDriver.stop()
         // Auto-save quick state on pause
         val gameKey = viewModel.activeRomTitle.value
         if (gameKey.isNotBlank()) {
@@ -188,8 +194,14 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        audioDriver.start()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        audioDriver.stop()
         viewModel.stopPolling()
         displayManager?.unregisterDisplayListener(this)
         companionPresentation?.dismiss()

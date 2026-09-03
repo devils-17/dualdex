@@ -12,6 +12,7 @@ enum class CompanionTab(val title: String, val iconEmoji: String) {
     PARTY("Party", "👥"),
     CALC("Calc", "⚔️"),
     TYPES("Types", "🛡️"),
+    DOCS("Docs", "📖"),
     SAVES("Saves", "💾"),
     ASSISTANT("Assistant", "🤖")
 }

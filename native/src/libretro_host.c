@@ -103,16 +103,51 @@ static void core_video_refresh_cb(const void *data, unsigned width, unsigned hei
     pthread_mutex_unlock(&g_video_mutex);
 }
 
+// Audio ring buffer (supports 44100Hz stereo PCM)
+#define AUDIO_RING_BUFFER_SIZE (65536)
+static int16_t g_audio_ring_buffer[AUDIO_RING_BUFFER_SIZE];
+static size_t g_audio_write_pos = 0;
+static size_t g_audio_read_pos = 0;
+static pthread_mutex_t g_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // Audio sample callbacks
 static void core_audio_sample_cb(int16_t left, int16_t right) {
-    (void)left;
-    (void)right;
-    // Audio samples can be routed to audio ring buffer
+    pthread_mutex_lock(&g_audio_mutex);
+    g_audio_ring_buffer[g_audio_write_pos] = left;
+    g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+    g_audio_ring_buffer[g_audio_write_pos] = right;
+    g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+    pthread_mutex_unlock(&g_audio_mutex);
 }
 
 static size_t core_audio_sample_batch_cb(const int16_t *data, size_t frames) {
-    (void)data;
+    if (!data || frames == 0) return 0;
+
+    pthread_mutex_lock(&g_audio_mutex);
+    size_t count = frames * 2;
+    for (size_t i = 0; i < count; i++) {
+        g_audio_ring_buffer[g_audio_write_pos] = data[i];
+        g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+    }
+    pthread_mutex_unlock(&g_audio_mutex);
     return frames;
+}
+
+size_t libretro_host_get_audio_samples(int16_t* out_buffer, size_t max_samples) {
+    if (!out_buffer || max_samples == 0) return 0;
+
+    pthread_mutex_lock(&g_audio_mutex);
+    size_t available = (g_audio_write_pos >= g_audio_read_pos)
+        ? (g_audio_write_pos - g_audio_read_pos)
+        : (AUDIO_RING_BUFFER_SIZE - g_audio_read_pos + g_audio_write_pos);
+
+    size_t to_read = (available < max_samples) ? available : max_samples;
+    for (size_t i = 0; i < to_read; i++) {
+        out_buffer[i] = g_audio_ring_buffer[g_audio_read_pos];
+        g_audio_read_pos = (g_audio_read_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+    }
+    pthread_mutex_unlock(&g_audio_mutex);
+    return to_read;
 }
 
 // Input poll and state callbacks

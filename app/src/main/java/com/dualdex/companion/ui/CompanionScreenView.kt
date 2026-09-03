@@ -27,8 +27,9 @@ class CompanionScreenView(
     private val partyView: PartyScreenView by lazy { PartyScreenView(context, viewModel) }
     private val calcView: CalcTabScreenView by lazy { CalcTabScreenView(context, viewModel) }
     private val typesView: TypeChartScreenView by lazy { TypeChartScreenView(context) }
+    private val docsView: DocsScreenView by lazy { DocsScreenView(context, viewModel) }
     private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel) }
-    private val assistantView: AssistantPlaceholderView by lazy { AssistantPlaceholderView(context, viewModel) }
+    private val assistantView: com.dualdex.assistant.AssistantScreenView by lazy { com.dualdex.assistant.AssistantScreenView(context, viewModel) }
 
     init {
         orientation = VERTICAL
@@ -138,6 +139,10 @@ class CompanionScreenView(
                 calcView
             }
             CompanionTab.TYPES -> typesView
+            CompanionTab.DOCS -> {
+                docsView.refreshUI()
+                docsView
+            }
             CompanionTab.SAVES -> {
                 savesView.refreshUI()
                 savesView

@@ -295,6 +295,21 @@ Java_com_dualdex_emulator_LibretroHost_nativeGetVideoFrame(
     return JNI_TRUE;
 }
 
+JNIEXPORT jint JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeGetAudioSamples(
+    JNIEnv* env,
+    jobject thiz,
+    jshortArray out_buffer
+) {
+    (void)thiz;
+    if (!out_buffer) return 0;
+    jsize len = (*env)->GetArrayLength(env, out_buffer);
+    jshort* buf = (*env)->GetShortArrayElements(env, out_buffer, NULL);
+    size_t read = libretro_host_get_audio_samples((int16_t*)buf, (size_t)len);
+    (*env)->ReleaseShortArrayElements(env, out_buffer, buf, 0);
+    return (jint)read;
+}
+
 JNIEXPORT jobjectArray JNICALL
 Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobject thiz, jint game_id) {
     (void)thiz;

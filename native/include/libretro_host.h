@@ -61,6 +61,12 @@ void libretro_host_step_frame(void);
 bool libretro_host_get_video_frame(EmulatorVideoFrame* out_frame);
 
 /**
+ * Retrieve pending 16-bit PCM audio samples from the core audio buffer.
+ * @return Number of samples read (samples = frames * 2 for stereo).
+ */
+size_t libretro_host_get_audio_samples(int16_t* out_buffer, size_t max_samples);
+
+/**
  * Set the current controller button state bitmask.
  */
 void libretro_host_set_input_buttons(uint32_t button_mask);

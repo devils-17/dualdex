@@ -20,34 +20,38 @@ class CalcTabScreenView(
     private val movesContainer: LinearLayout
     private val attackerHeaderView: TextView
     private val defenderHeaderView: TextView
+    private val defenderAutoInput: AutoCompleteTextView
+    private val weatherSpinner: Spinner
+    private val critCheckBox: CheckBox
+    private val screensCheckBox: CheckBox
 
     private var selectedDefenderSpecies = "Skarmory"
+    private var selectedMoveName = "Rock Slide"
+    private var currentWeather: String? = null
+    private var isCrit: Boolean = false
+    private var hasScreens: Boolean = false
 
     init {
         orientation = VERTICAL
         setBackgroundColor(0xFF121216.toInt())
-        setPadding(24, 24, 24, 24)
+        setPadding(20, 20, 20, 20)
 
-        val scroll = ScrollView(context).apply {
-            isVerticalScrollBarEnabled = true
-        }
-        val content = LinearLayout(context).apply {
-            orientation = VERTICAL
-        }
+        val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = true }
+        val content = LinearLayout(context).apply { orientation = VERTICAL }
         scroll.addView(content)
         addView(scroll)
 
         // Title
         val titleView = TextView(context).apply {
-            text = "⚔️ DualDex Live Damage Calculator"
+            text = "⚔️ DualDex Damage Calculator"
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, 14)
         }
         content.addView(titleView)
 
-        // Matchup Card (Attacker vs Defender)
+        // Attacker & Defender Header Card
         val matchupCard = createCardLayout().apply {
             attackerHeaderView = TextView(context).apply {
                 setTextColor(0xFF4A9EFF.toInt())
@@ -58,56 +62,132 @@ class CalcTabScreenView(
                 setTextColor(0xFFFF6B6B.toInt())
                 textSize = 15f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 6, 0, 0)
+                setPadding(0, 4, 0, 8)
             }
             addView(attackerHeaderView)
             addView(defenderHeaderView)
 
-            // Quick defender switch buttons
-            val defPickerRow = LinearLayout(context).apply {
-                orientation = HORIZONTAL
-                setPadding(0, 12, 0, 0)
-            }
-            val defLabel = TextView(context).apply {
-                text = "Target: "
+            // Defender Autocomplete Search Input
+            val searchLabel = TextView(context).apply {
+                text = "Target Pokemon Search / Autocomplete:"
                 setTextColor(0xFFAAAAAA.toInt())
-                textSize = 13f
-                gravity = Gravity.CENTER_VERTICAL
+                textSize = 12f
+                setPadding(0, 4, 0, 4)
             }
-            defPickerRow.addView(defLabel)
+            addView(searchLabel)
 
-            listOf("Skarmory", "Blaziken", "Swampert", "Gengar", "Dragonite").forEach { targetName ->
-                val btn = Button(context).apply {
-                    text = targetName
-                    textSize = 11f
-                    setTextColor(Color.WHITE)
-                    background = GradientDrawable().apply {
-                        cornerRadius = 14f
-                        setColor(0xFF2E2E38.toInt())
-                    }
-                    setPadding(16, 4, 16, 4)
-                    setOnClickListener {
-                        selectedDefenderSpecies = targetName
-                        recalculateDefault()
-                    }
+            val speciesSuggestions = listOf(
+                "Bulbasaur", "Ivysaur", "Venusaur", "Charmander", "Charmeleon", "Charizard",
+                "Squirtle", "Wartortle", "Blastoise", "Pikachu", "Raichu", "Gengar", "Gyarados",
+                "Lapras", "Snorlax", "Dragonite", "Mewtwo", "Treecko", "Grovyle", "Sceptile",
+                "Torchic", "Combusken", "Blaziken", "Mudkip", "Marshtomp", "Swampert",
+                "Gardevoir", "Sableye", "Aggron", "Flygon", "Salamence", "Metagross", "Rayquaza",
+                "Skarmory", "Lichtoise", "Spectrasaur", "Phantomander"
+            )
+
+            val adapter = ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, speciesSuggestions)
+            defenderAutoInput = AutoCompleteTextView(context).apply {
+                hint = "Type defender species (e.g. Blaziken)"
+                setHintTextColor(0xFF777788.toInt())
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                setAdapter(adapter)
+                threshold = 1
+                background = GradientDrawable().apply {
+                    cornerRadius = 12f
+                    setColor(0xFF16161E.toInt())
+                    setStroke(2, 0xFF333348.toInt())
                 }
-                val lp = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(0, 0, 10, 0)
+                setPadding(16, 10, 16, 10)
+                setOnItemClickListener { _, _, position, _ ->
+                    val chosen = adapter.getItem(position) ?: return@setOnItemClickListener
+                    selectedDefenderSpecies = chosen
+                    recalculate()
                 }
-                defPickerRow.addView(btn, lp)
             }
-            addView(defPickerRow)
+            addView(defenderAutoInput)
         }
         content.addView(matchupCard)
+
+        // Field Conditions Card (Weather, Screens, Crits)
+        val fieldCard = createCardLayout().apply {
+            val fieldLabel = TextView(context).apply {
+                text = "Field Conditions & Modifiers"
+                setTextColor(0xFF50C878.toInt())
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, 8)
+            }
+            addView(fieldLabel)
+
+            val row1 = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+            val weatherLabel = TextView(context).apply {
+                text = "Weather: "
+                setTextColor(Color.WHITE)
+                textSize = 13f
+            }
+            row1.addView(weatherLabel)
+
+            val weatherOptions = listOf("None", "Sun", "Rain", "Sand", "Hail")
+            val weatherAdapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, weatherOptions)
+            weatherSpinner = Spinner(context).apply {
+                this.adapter = weatherAdapter
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(p0: AdapterView<*>?, p1: android.view.View?, pos: Int, p3: Long) {
+                        currentWeather = if (pos == 0) null else weatherOptions[pos]
+                        recalculate()
+                    }
+                    override fun onNothingSelected(p0: AdapterView<*>?) {}
+                }
+            }
+            row1.addView(weatherSpinner)
+            addView(row1)
+
+            val row2 = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                setPadding(0, 6, 0, 0)
+            }
+
+            critCheckBox = CheckBox(context).apply {
+                text = "Critical Hit"
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                setOnCheckedChangeListener { _, checked ->
+                    isCrit = checked
+                    recalculate()
+                }
+            }
+            row2.addView(critCheckBox)
+
+            screensCheckBox = CheckBox(context).apply {
+                text = "Reflect / Light Screen"
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                setOnCheckedChangeListener { _, checked ->
+                    hasScreens = checked
+                    recalculate()
+                }
+            }
+            val lpScreen = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                setMargins(20, 0, 0, 0)
+            }
+            row2.addView(screensCheckBox, lpScreen)
+            addView(row2)
+        }
+        content.addView(fieldCard)
 
         // Moves Selection Card
         val movesCard = createCardLayout().apply {
             val movesTitle = TextView(context).apply {
-                text = "Select Move to Calculate"
+                text = "Attacker Moves"
                 setTextColor(0xFFFFFFFF.toInt())
-                textSize = 16f
+                textSize = 15f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, 0, 10)
+                setPadding(0, 0, 0, 8)
             }
             addView(movesTitle)
 
@@ -118,7 +198,7 @@ class CalcTabScreenView(
         }
         content.addView(movesCard)
 
-        // Calculation Result Card
+        // Result Card
         val resultCard = createCardLayout().apply {
             val resTitle = TextView(context).apply {
                 text = "Damage Calculation Result"
@@ -147,9 +227,17 @@ class CalcTabScreenView(
         val selectedIdx = viewModel.selectedMemberIndex.value
         val attacker = if (party.isNotEmpty() && selectedIdx in party.indices) party[selectedIdx] else null
 
+        // Auto-populate defender from opponent memory read if in battle!
         val enemyParty = viewModel.enemyParty.value
-        val activeEnemy = enemyParty.firstOrNull { !it.isEmpty && it.isValid }
-        val defSpecies = activeEnemy?.nickname?.ifEmpty { null } ?: selectedDefenderSpecies
+        val inBattle = viewModel.isInBattle.value
+        if (inBattle && enemyParty.isNotEmpty()) {
+            val enemyMon = enemyParty[0]
+            val speciesName = if (enemyMon.nickname.isNotBlank()) enemyMon.nickname else SpeciesDatabase.get(enemyMon.species).name
+            selectedDefenderSpecies = speciesName
+            defenderHeaderView.text = "🔴 Defender (Opponent In-Battle): $selectedDefenderSpecies (Lv. ${enemyMon.level})"
+        } else {
+            defenderHeaderView.text = "🔴 Defender: $selectedDefenderSpecies (Lv. 50)"
+        }
 
         val atkName = attacker?.nickname?.ifEmpty { null }
             ?: attacker?.let { SpeciesDatabase.get(it.species).name }
@@ -157,10 +245,8 @@ class CalcTabScreenView(
         val atkLevel = attacker?.level ?: 50
 
         attackerHeaderView.text = "🔵 Attacker: $atkName (Lv. $atkLevel)"
-        defenderHeaderView.text = "🔴 Defender: $defSpecies (Lv. 50)"
 
         movesContainer.removeAllViews()
-
         val availableMoves = mutableListOf<String>()
         if (attacker != null) {
             attacker.moves.forEach { mId ->
@@ -174,41 +260,47 @@ class CalcTabScreenView(
             availableMoves.addAll(listOf("Rock Slide", "Earthquake", "Flamethrower", "Hydro Pump"))
         }
 
-        val btnRow = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-        }
+        val btnRow = LinearLayout(context).apply { orientation = HORIZONTAL }
         availableMoves.forEach { moveName ->
+            val isSelected = (moveName == selectedMoveName)
             val moveBtn = Button(context).apply {
                 text = moveName
-                textSize = 13f
+                textSize = 12.5f
                 setTextColor(Color.WHITE)
                 background = GradientDrawable().apply {
-                    cornerRadius = 16f
-                    setColor(0xFF2B3A55.toInt())
+                    cornerRadius = 14f
+                    setColor(if (isSelected) 0xFF4A9EFF.toInt() else 0xFF2B3A55.toInt())
                 }
-                setPadding(20, 10, 20, 10)
+                setPadding(18, 8, 18, 8)
                 setOnClickListener {
-                    runCalculation(atkName, atkLevel, defSpecies, moveName)
+                    selectedMoveName = moveName
+                    recalculate()
+                    refreshUI()
                 }
             }
             val lp = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 12, 8)
+                setMargins(0, 0, 10, 6)
             }
             btnRow.addView(moveBtn, lp)
         }
         movesContainer.addView(btnRow)
 
-        // Run default calc
-        if (availableMoves.isNotEmpty()) {
-            runCalculation(atkName, atkLevel, defSpecies, availableMoves[0])
+        if (selectedMoveName.isEmpty() && availableMoves.isNotEmpty()) {
+            selectedMoveName = availableMoves[0]
         }
+        recalculate()
     }
 
-    private fun recalculateDefault() {
-        refreshUI()
-    }
+    private fun recalculate() {
+        val party = viewModel.playerParty.value
+        val selectedIdx = viewModel.selectedMemberIndex.value
+        val attacker = if (party.isNotEmpty() && selectedIdx in party.indices) party[selectedIdx] else null
 
-    private fun runCalculation(atkSpecies: String, atkLevel: Int, defSpecies: String, moveName: String) {
+        val atkSpecies = attacker?.nickname?.ifEmpty { null }
+            ?: attacker?.let { SpeciesDatabase.get(it.species).name }
+            ?: "Salamence"
+        val atkLevel = attacker?.level ?: 50
+
         val req = DamageCalculationRequest(
             gen = 3,
             attacker = CalcPokemonInput(
@@ -217,11 +309,15 @@ class CalcTabScreenView(
                 evs = StatBlock(atk = 252, spa = 252, spe = 252)
             ),
             defender = CalcPokemonInput(
-                species = defSpecies,
+                species = selectedDefenderSpecies,
                 level = 50,
                 evs = StatBlock(hp = 252, def = 252, spd = 252)
             ),
-            move = CalcMoveInput(name = moveName)
+            move = CalcMoveInput(name = selectedMoveName, isCrit = isCrit),
+            field = CalcFieldInput(
+                weather = currentWeather,
+                gameType = "singles"
+            )
         )
 
         val res = DamageCalculator.calculate(req)
@@ -229,27 +325,29 @@ class CalcTabScreenView(
             val rangeStr = if (res.range.isNotEmpty()) "${res.minDamage} - ${res.maxDamage} HP" else "N/A"
             val rollsStr = res.range.joinToString(", ")
             val koText = if (res.koChanceText.isNotBlank()) "\nKO Chance: ${res.koChanceText}" else ""
+            val critText = if (isCrit) " [Critical Hit!]" else ""
+            val weatherText = if (currentWeather != null) " [Weather: $currentWeather]" else ""
 
-            resultTextView.text = "${res.desc}\n\n" +
+            resultTextView.text = "${res.desc}$critText$weatherText\n\n" +
                     "Damage Range: $rangeStr\n" +
                     "Move: ${res.moveName} (${res.moveType} ${res.moveCategory}, ${res.movePower} Power)\n" +
                     "Defender Max HP: ${res.defenderMaxHP} HP$koText\n\n" +
-                    "All Rolls (16 values): [$rollsStr]"
+                    "Damage Rolls (16): [$rollsStr]"
         } else {
-            resultTextView.text = "Calculation failed: ${res.error ?: "Unknown error"}"
+            resultTextView.text = "Calculation: ${res.error ?: "Select move to calculate"}"
         }
     }
 
     private fun createCardLayout(): LinearLayout {
         return LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(24, 20, 24, 20)
+            setPadding(18, 16, 18, 16)
             background = GradientDrawable().apply {
-                cornerRadius = 24f
+                cornerRadius = 18f
                 setColor(0xFF1E1E26.toInt())
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 20)
+                setMargins(0, 0, 0, 14)
             }
         }
     }
