@@ -11,12 +11,15 @@ import com.dualdex.emulator.SaveStateManager
 
 class SaveStateScreenView(
     context: Context,
-    private val viewModel: CompanionViewModel
+    private val viewModel: CompanionViewModel,
+    private val onImportSaveRequested: (() -> Unit)? = null,
+    private val onExportSaveRequested: (() -> Unit)? = null
 ) : LinearLayout(context) {
 
     private val saveStateManager = SaveStateManager(context)
     private val slotsContainer: LinearLayout
     private val quickSaveStatusView: TextView
+    private val batterySaveStatusView: TextView
 
     init {
         orientation = VERTICAL
@@ -30,13 +33,82 @@ class SaveStateScreenView(
 
         // Title
         val titleView = TextView(context).apply {
-            text = "💾 Save State Manager"
+            text = "💾 Save & Migration Manager"
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
             setPadding(0, 0, 0, 16)
         }
         content.addView(titleView)
+
+        // Cartridge Battery Save (.sav) Migration Card (My Boy! & GBA)
+        val batteryCard = createCardLayout().apply {
+            val label = TextView(context).apply {
+                text = "Cartridge Battery Save (.sav)"
+                setTextColor(0xFF4A9EFF.toInt())
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, 4)
+            }
+            addView(label)
+
+            val desc = TextView(context).apply {
+                text = "Import your in-progress playthrough from My Boy! or export to PC/other emulators."
+                setTextColor(0xFF9999AA.toInt())
+                textSize = 12f
+                setPadding(0, 0, 0, 10)
+            }
+            addView(desc)
+
+            val btnRow = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                setPadding(0, 4, 0, 8)
+            }
+
+            val importBtn = Button(context).apply {
+                text = "📥 Import .sav (My Boy!)"
+                setTextColor(Color.WHITE)
+                textSize = 12.5f
+                typeface = Typeface.DEFAULT_BOLD
+                background = GradientDrawable().apply {
+                    cornerRadius = 16f
+                    setColor(0xFF2E6B4A.toInt())
+                }
+                setPadding(16, 10, 16, 10)
+                setOnClickListener {
+                    onImportSaveRequested?.invoke()
+                }
+            }
+            val lp1 = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f).apply { setMargins(0, 0, 8, 0) }
+            btnRow.addView(importBtn, lp1)
+
+            val exportBtn = Button(context).apply {
+                text = "📤 Export .sav"
+                setTextColor(Color.WHITE)
+                textSize = 12.5f
+                typeface = Typeface.DEFAULT_BOLD
+                background = GradientDrawable().apply {
+                    cornerRadius = 16f
+                    setColor(0xFF2B4A77.toInt())
+                }
+                setPadding(16, 10, 16, 10)
+                setOnClickListener {
+                    onExportSaveRequested?.invoke()
+                }
+            }
+            val lp2 = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f).apply { setMargins(8, 0, 0, 0) }
+            btnRow.addView(exportBtn, lp2)
+
+            addView(btnRow)
+
+            batterySaveStatusView = TextView(context).apply {
+                setTextColor(0xFFAAAAAA.toInt())
+                textSize = 12f
+                setPadding(0, 4, 0, 0)
+            }
+            addView(batterySaveStatusView)
+        }
+        content.addView(batteryCard)
 
         // Quick Save / Load Card
         val quickCard = createCardLayout().apply {
@@ -131,6 +203,14 @@ class SaveStateScreenView(
 
     fun refreshUI() {
         val gameKey = getGameKey()
+
+        val bInfo = saveStateManager.getBatterySaveInfo(gameKey)
+        batterySaveStatusView.text = if (bInfo.exists) {
+            "Active Battery Save: ${bInfo.sizeBytes / 1024} KB (Saved: ${bInfo.formattedDate})"
+        } else {
+            "No .sav file found on disk (auto-saves on in-game save / pause)."
+        }
+
         val qFile = saveStateManager.getQuickSaveFilePath(gameKey)
         quickSaveStatusView.text = if (qFile.exists()) {
             "Latest Quick Save: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(qFile.lastModified()))}"

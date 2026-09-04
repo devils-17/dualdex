@@ -18,5 +18,8 @@ object LibretroHost {
     external fun nativeReadEnemyPartyFromCore(gameId: Int): Array<ParsedPokemon>?
     external fun nativeSaveState(statePath: String): Boolean
     external fun nativeLoadState(statePath: String): Boolean
+    external fun nativeLoadSaveRam(savePath: String): Boolean
+    external fun nativeFlushSaveRam(savePath: String): Boolean
+    external fun nativeResetCore()
     external fun nativeCleanup()
 }

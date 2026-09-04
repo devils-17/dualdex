@@ -33,8 +33,10 @@ import java.io.FileOutputStream
 class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     private val viewModel = CompanionViewModel()
+    private val saveStateManager by lazy { SaveStateManager(this) }
     private var emulatorView: EmulatorSurfaceView? = null
     private var companionPresentation: CompanionPresentation? = null
+    private var currentCompanionScreenView: CompanionScreenView? = null
     private var displayManager: DisplayManager? = null
     private var loadedProfiles: List<RomHackProfile> = emptyList()
     private val audioDriver = AudioDriver(32768)
@@ -42,6 +44,33 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
     private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             handleSelectedRom(uri)
+        }
+    }
+
+    private val importSaveLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            val gameKey = viewModel.activeRomTitle.value.ifEmpty { "current_game" }
+            val success = saveStateManager.importBatterySave(gameKey, uri)
+            if (success) {
+                Toast.makeText(this@MainActivity, "Imported battery save! Game reset to load save.", Toast.LENGTH_LONG).show()
+                companionPresentation?.refreshSavesTab()
+                currentCompanionScreenView?.refreshSavesTab()
+            } else {
+                Toast.makeText(this@MainActivity, "Failed to import battery save (.sav)", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private val exportSaveLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
+        if (uri != null) {
+            val gameKey = viewModel.activeRomTitle.value.ifEmpty { "current_game" }
+            saveStateManager.flushBatterySave(gameKey)
+            val success = saveStateManager.exportBatterySave(gameKey, uri)
+            if (success) {
+                Toast.makeText(this@MainActivity, "Exported battery save successfully!", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this@MainActivity, "Failed to export battery save", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -124,9 +153,19 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
                 // Load ROM into mGBA core
                 val ok = LibretroHost.nativeLoadRom(localRomFile.absolutePath)
+                if (ok) {
+                    // Auto-load cartridge battery save (.sav) if present
+                    val gameKey = profile.name.ifEmpty { "current_game" }
+                    val loadedSave = saveStateManager.loadBatterySave(gameKey)
+                    if (loadedSave) {
+                        Log.i("DualDex", "Restored existing battery save for $gameKey")
+                    }
+                }
                 withContext(Dispatchers.Main) {
                     if (ok) {
                         Toast.makeText(this@MainActivity, "Loaded: ${profile.name} (${profile.engine})", Toast.LENGTH_LONG).show()
+                        companionPresentation?.refreshSavesTab()
+                        currentCompanionScreenView?.refreshSavesTab()
                     } else {
                         Toast.makeText(this@MainActivity, "Failed to load ROM in mGBA core", Toast.LENGTH_SHORT).show()
                     }
@@ -194,7 +233,12 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
             viewModel = viewModel,
             onOpenRomRequested = { openRomLauncher.launch(arrayOf("*/*")) },
             onShaderChanged = { filter: ShaderFilter -> emulatorView?.setShaderFilter(filter) },
-            onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) }
+            onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) },
+            onImportSaveRequested = { importSaveLauncher.launch(arrayOf("*/*", "application/octet-stream")) },
+            onExportSaveRequested = {
+                val key = viewModel.activeRomTitle.value.ifEmpty { "current_game" }.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
+                exportSaveLauncher.launch("$key.sav")
+            }
         ).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -202,6 +246,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 1.0f
             )
         }
+        currentCompanionScreenView = companionView
         splitLayout.addView(companionView)
 
         setContentView(splitLayout)
@@ -216,7 +261,12 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 viewModel = viewModel,
                 onOpenRomRequested = { openRomLauncher.launch(arrayOf("*/*")) },
                 onShaderChanged = { filter: ShaderFilter -> emulatorView?.setShaderFilter(filter) },
-                onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) }
+                onSpeedChanged = { speed: Int -> emulatorView?.setSpeedMultiplier(speed) },
+                onImportSaveRequested = { importSaveLauncher.launch(arrayOf("*/*", "application/octet-stream")) },
+                onExportSaveRequested = {
+                    val key = viewModel.activeRomTitle.value.ifEmpty { "current_game" }.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
+                    exportSaveLauncher.launch("$key.sav")
+                }
             ).apply {
                 show()
             }
@@ -244,10 +294,11 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
         super.onPause()
         emulatorView?.onPause()
         audioDriver.stop()
-        // Auto-save quick state on pause
-        val gameKey = viewModel.activeRomTitle.value
+        // Auto-flush cartridge battery save (.sav) and save quick state on pause
+        val gameKey = viewModel.activeRomTitle.value.ifEmpty { "current_game" }
         if (gameKey.isNotBlank()) {
-            SaveStateManager(this).quickSave(gameKey)
+            saveStateManager.flushBatterySave(gameKey)
+            saveStateManager.quickSave(gameKey)
         }
     }
 
@@ -259,11 +310,16 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        val gameKey = viewModel.activeRomTitle.value.ifEmpty { "current_game" }
+        if (gameKey.isNotBlank()) {
+            saveStateManager.flushBatterySave(gameKey)
+        }
         audioDriver.stop()
         viewModel.stopPolling()
         displayManager?.unregisterDisplayListener(this)
         companionPresentation?.dismiss()
         companionPresentation = null
+        currentCompanionScreenView = null
         emulatorView?.onPause()
         LibretroHost.nativeCleanup()
     }

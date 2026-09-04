@@ -78,6 +78,41 @@ class RomHackProfileTest {
         assertEquals("https://dex.radicalred.net", profile.docsUrl)
     }
 
+    private val heartAndSoulJson = """
+        {
+          "id": "heart_and_soul",
+          "name": "Pokemon Heart & Soul",
+          "baseGame": "Emerald",
+          "gameId": 1,
+          "developer": "Lil Dill / PokemonHnS-Development",
+          "engine": "pokeemerald-expansion",
+          "hasEvs": true,
+          "hasIvs": true,
+          "hasPhysSpecSplit": true,
+          "steelResistsGhostDark": false,
+          "cfruOffsets": false,
+          "playerPartyOffset": 33703148,
+          "enemyPartyOffset": 33703748,
+          "docsUrl": "https://pokemonhns-development.github.io/pokehns-expansion-documentation/",
+          "headerTitles": ["HEARTSOUL", "HNS", "POKEHNS"]
+        }
+    """.trimIndent()
+
+    @Test
+    fun testParseHeartAndSoulProfile() {
+        val profile = ProfileLoader.parseProfile(heartAndSoulJson)
+        assertEquals("heart_and_soul", profile.id)
+        assertEquals("Pokemon Heart & Soul", profile.name)
+        assertEquals("Emerald", profile.baseGame)
+        assertEquals(1, profile.gameId)
+        assertTrue(profile.hasEvs)
+        assertTrue(profile.hasIvs)
+        assertTrue(profile.hasPhysSpecSplit)
+        assertFalse(profile.steelResistsGhostDark)
+        assertEquals("pokeemerald-expansion", profile.engine)
+        assertEquals("https://pokemonhns-development.github.io/pokehns-expansion-documentation/", profile.docsUrl)
+    }
+
     @Test
     fun testRomHackDetectorByHeaderTitle() {
         val profiles = listOf(

@@ -1,9 +1,12 @@
 package com.dualdex.companion.ui
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.BatteryManager
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -13,45 +16,69 @@ import android.widget.TextView
 import com.dualdex.companion.CompanionTab
 import com.dualdex.companion.CompanionViewModel
 import com.dualdex.emulator.ShaderFilter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class CompanionScreenView(
     context: Context,
     private val viewModel: CompanionViewModel,
     private val onOpenRomRequested: (() -> Unit)? = null,
     private val onShaderChanged: ((ShaderFilter) -> Unit)? = null,
-    private val onSpeedChanged: ((Int) -> Unit)? = null
+    private val onSpeedChanged: ((Int) -> Unit)? = null,
+    private val onImportSaveRequested: (() -> Unit)? = null,
+    private val onExportSaveRequested: (() -> Unit)? = null
 ) : LinearLayout(context) {
 
     private val contentContainer: FrameLayout
     private val tabButtons = mutableMapOf<CompanionTab, TextView>()
+    private val timeView: TextView
     private val profileLabel: TextView
     private val battleBadge: TextView
+    private val batteryView: TextView
 
     private val partyView: PartyScreenView by lazy { PartyScreenView(context, viewModel) }
     private val calcView: CalcTabScreenView by lazy { CalcTabScreenView(context, viewModel) }
     private val typesView: TypeChartScreenView by lazy { TypeChartScreenView(context, viewModel) }
     private val docsView: DocsScreenView by lazy { DocsScreenView(context, viewModel) }
-    private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel) }
+    private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel, onImportSaveRequested, onExportSaveRequested) }
     private val assistantView: com.dualdex.assistant.AssistantScreenView by lazy { com.dualdex.assistant.AssistantScreenView(context, viewModel) }
     private val settingsView: SettingsScreenView by lazy { SettingsScreenView(context, viewModel, onShaderChanged, onSpeedChanged) }
+
+    private val statusUpdateRunnable = object : Runnable {
+        override fun run() {
+            updateSystemStatus()
+            postDelayed(this, 15000L)
+        }
+    }
 
     init {
         orientation = VERTICAL
         setBackgroundColor(0xFF101014.toInt())
 
-        // Top Status Header (ROM Name, Open ROM button, Battle Status)
+        // Top Status Header (Time, ROM Name, Open ROM, Battle Status, Battery)
         val headerBar = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(20, 14, 20, 14)
+            setPadding(16, 12, 16, 12)
             setBackgroundColor(0xFF16161E.toInt())
         }
 
+        // Top-left: System Clock
+        timeView = TextView(context).apply {
+            setTextColor(0xFFD0D0E0.toInt())
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 10, 0)
+        }
+        headerBar.addView(timeView)
+
+        // ROM / Profile label
         profileLabel = TextView(context).apply {
             val prof = viewModel.activeProfile.value
             text = "⚡ ${prof.name}"
             setTextColor(0xFF4A9EFF.toInt())
-            textSize = 14f
+            textSize = 13.5f
             typeface = Typeface.DEFAULT_BOLD
         }
         headerBar.addView(profileLabel)
@@ -74,7 +101,7 @@ class CompanionScreenView(
                 setOnClickListener { onOpenRomRequested.invoke() }
             }
             val lpRom = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 10, 0)
+                setMargins(0, 0, 8, 0)
             }
             headerBar.addView(openRomBtn, lpRom)
         }
@@ -84,15 +111,34 @@ class CompanionScreenView(
             setTextColor(0xFF50C878.toInt())
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(12, 4, 12, 4)
+            setPadding(10, 4, 10, 4)
             background = GradientDrawable().apply {
                 cornerRadius = 10f
                 setColor(0xFF1F2B24.toInt())
                 setStroke(1, 0xFF50C878.toInt())
             }
         }
-        headerBar.addView(battleBadge)
+        val lpBadge = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, 0, 8, 0)
+        }
+        headerBar.addView(battleBadge, lpBadge)
+
+        // Top-right: Battery Charge Indicator
+        batteryView = TextView(context).apply {
+            text = "🔋 --%"
+            setTextColor(0xFF50C878.toInt())
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(10, 4, 10, 4)
+            background = GradientDrawable().apply {
+                cornerRadius = 10f
+                setColor(0xFF1E222B.toInt())
+            }
+        }
+        headerBar.addView(batteryView)
+
         addView(headerBar)
+        updateSystemStatus()
 
         // Middle Content Container
         contentContainer = FrameLayout(context).apply {
@@ -192,4 +238,61 @@ class CompanionScreenView(
             }
         }
     }
+
+    fun refreshSavesTab() {
+        post {
+            if (viewModel.selectedTab.value == CompanionTab.SAVES) {
+                savesView.refreshUI()
+            }
+        }
+    }
+
+    fun updateSystemStatus() {
+        post {
+            try {
+                // 1. Time (12-hour format with AM/PM)
+                val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+                timeView.text = "🕒 ${timeFormat.format(Date())}"
+
+                // 2. Battery Percentage and Status via sticky intent
+                val batteryStatus: Intent? = context.registerReceiver(
+                    null,
+                    IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+                )
+                if (batteryStatus != null) {
+                    val level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                    val scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                    val status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                    val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                            status == BatteryManager.BATTERY_STATUS_FULL
+                    val pct = if (scale > 0 && level >= 0) (level * 100 / scale) else -1
+                    if (pct >= 0) {
+                        val icon = if (isCharging) "⚡" else if (pct <= 20) "🪫" else "🔋"
+                        batteryView.text = "$icon $pct%"
+                        batteryView.setTextColor(
+                            if (isCharging) 0xFF4A9EFF.toInt()
+                            else if (pct <= 20) 0xFFFF6B6B.toInt()
+                            else 0xFF50C878.toInt()
+                        )
+                    } else {
+                        batteryView.text = "🔋 --%"
+                    }
+                }
+            } catch (e: Throwable) {
+                // Ignore background status read errors
+            }
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        updateSystemStatus()
+        postDelayed(statusUpdateRunnable, 15000L)
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        removeCallbacks(statusUpdateRunnable)
+    }
 }
+

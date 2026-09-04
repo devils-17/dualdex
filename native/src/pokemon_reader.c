@@ -147,6 +147,9 @@ GbaGameId pokemon_detect_game(const char* rom_title_16) {
     if (strstr(title_buf, "RADICAL") != NULL) {
         return GAME_RADICAL_RED;
     }
+    if (strstr(title_buf, "HEARTSOUL") != NULL || strstr(title_buf, "HNS") != NULL || strstr(title_buf, "HEART") != NULL) {
+        return GAME_EMERALD;
+    }
 
     return GAME_UNKNOWN;
 }

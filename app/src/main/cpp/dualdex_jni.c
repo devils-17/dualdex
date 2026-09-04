@@ -426,6 +426,33 @@ Java_com_dualdex_emulator_LibretroHost_nativeLoadState(JNIEnv* env, jobject thiz
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeLoadSaveRam(JNIEnv* env, jobject thiz, jstring save_path) {
+    (void)thiz;
+    if (!save_path) return JNI_FALSE;
+    const char* path_str = (*env)->GetStringUTFChars(env, save_path, NULL);
+    bool ok = libretro_host_load_save_ram(path_str);
+    (*env)->ReleaseStringUTFChars(env, save_path, path_str);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeFlushSaveRam(JNIEnv* env, jobject thiz, jstring save_path) {
+    (void)thiz;
+    if (!save_path) return JNI_FALSE;
+    const char* path_str = (*env)->GetStringUTFChars(env, save_path, NULL);
+    bool ok = libretro_host_flush_save_ram(path_str);
+    (*env)->ReleaseStringUTFChars(env, save_path, path_str);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeResetCore(JNIEnv* env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    libretro_host_reset();
+}
+
 JNIEXPORT void JNICALL
 Java_com_dualdex_emulator_LibretroHost_nativeCleanup(JNIEnv* env, jobject thiz) {
     (void)env;

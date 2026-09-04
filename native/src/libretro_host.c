@@ -363,6 +363,55 @@ bool libretro_host_load_state(const char* save_state_path) {
     return ok;
 }
 
+bool libretro_host_load_save_ram(const char* save_path) {
+    if (!g_core_handle || !g_is_game_loaded || !p_retro_get_memory_data || !p_retro_get_memory_size || !save_path) {
+        return false;
+    }
+    void* ram = p_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+    size_t ram_size = p_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+    if (!ram || ram_size == 0) return false;
+
+    FILE* f = fopen(save_path, "rb");
+    if (!f) return false;
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (file_size <= 0) {
+        fclose(f);
+        return false;
+    }
+
+    size_t to_read = ((size_t)file_size > ram_size) ? ram_size : (size_t)file_size;
+    memset(ram, 0xFF, ram_size);
+    size_t bytes_read = fread(ram, 1, to_read, f);
+    fclose(f);
+
+    return (bytes_read > 0);
+}
+
+bool libretro_host_flush_save_ram(const char* save_path) {
+    if (!g_core_handle || !g_is_game_loaded || !p_retro_get_memory_data || !p_retro_get_memory_size || !save_path) {
+        return false;
+    }
+    void* ram = p_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+    size_t ram_size = p_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+    if (!ram || ram_size == 0) return false;
+
+    FILE* f = fopen(save_path, "wb");
+    if (!f) return false;
+
+    size_t written = fwrite(ram, 1, ram_size, f);
+    fclose(f);
+    return (written == ram_size);
+}
+
+void libretro_host_reset(void) {
+    if (g_core_handle && g_is_game_loaded && p_retro_reset) {
+        p_retro_reset();
+    }
+}
+
 void libretro_host_cleanup(void) {
     if (g_is_game_loaded && p_retro_unload_game) {
         p_retro_unload_game();

@@ -15,7 +15,9 @@ class CompanionPresentation(
     private val viewModel: CompanionViewModel,
     private val onOpenRomRequested: (() -> Unit)? = null,
     private val onShaderChanged: ((com.dualdex.emulator.ShaderFilter) -> Unit)? = null,
-    private val onSpeedChanged: ((Int) -> Unit)? = null
+    private val onSpeedChanged: ((Int) -> Unit)? = null,
+    private val onImportSaveRequested: (() -> Unit)? = null,
+    private val onExportSaveRequested: (() -> Unit)? = null
 ) : Presentation(context, display) {
 
     private var companionScreenView: CompanionScreenView? = null
@@ -24,7 +26,15 @@ class CompanionPresentation(
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val screen = CompanionScreenView(context, viewModel, onOpenRomRequested, onShaderChanged, onSpeedChanged).apply {
+        val screen = CompanionScreenView(
+            context = context,
+            viewModel = viewModel,
+            onOpenRomRequested = onOpenRomRequested,
+            onShaderChanged = onShaderChanged,
+            onSpeedChanged = onSpeedChanged,
+            onImportSaveRequested = onImportSaveRequested,
+            onExportSaveRequested = onExportSaveRequested
+        ).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -52,5 +62,9 @@ class CompanionPresentation(
         super.onStop()
         presentationScope.cancel()
         companionScreenView = null
+    }
+
+    fun refreshSavesTab() {
+        companionScreenView?.refreshSavesTab()
     }
 }

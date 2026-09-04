@@ -87,6 +87,21 @@ bool libretro_host_save_state(const char* save_state_path);
 bool libretro_host_load_state(const char* save_state_path);
 
 /**
+ * Load cartridge battery save RAM (SRAM / Flash 128KB) from a .sav file.
+ */
+bool libretro_host_load_save_ram(const char* save_path);
+
+/**
+ * Flush cartridge battery save RAM to a .sav file on disk.
+ */
+bool libretro_host_flush_save_ram(const char* save_path);
+
+/**
+ * Reset emulation core (soft reset).
+ */
+void libretro_host_reset(void);
+
+/**
  * Unload ROM and core.
  */
 void libretro_host_cleanup(void);
