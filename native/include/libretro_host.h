@@ -112,6 +112,11 @@ double libretro_host_get_target_fps(void);
 double libretro_host_get_sample_rate(void);
 
 /**
+ * Flush/clear audio ring buffer to eliminate latency buildup.
+ */
+void libretro_host_clear_audio(void);
+
+/**
  * Unload ROM and core.
  */
 void libretro_host_cleanup(void);

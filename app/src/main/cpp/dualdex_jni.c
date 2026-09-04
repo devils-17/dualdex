@@ -342,6 +342,16 @@ Java_com_dualdex_emulator_LibretroHost_nativeGetAudioSamples(
     return (jint)read;
 }
 
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeClearAudio(
+    JNIEnv* env,
+    jobject thiz
+) {
+    (void)env;
+    (void)thiz;
+    libretro_host_clear_audio();
+}
+
 JNIEXPORT jobjectArray JNICALL
 Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobject thiz, jint game_id) {
     (void)thiz;

@@ -107,12 +107,19 @@ static void core_video_refresh_cb(const void *data, unsigned width, unsigned hei
     pthread_mutex_unlock(&g_video_mutex);
 }
 
-// Audio ring buffer (supports 44100Hz stereo PCM)
-#define AUDIO_RING_BUFFER_SIZE (65536)
+// Audio ring buffer (low-latency PCM, capped to prevent drift)
+#define AUDIO_RING_BUFFER_SIZE (8192)
 static int16_t g_audio_ring_buffer[AUDIO_RING_BUFFER_SIZE];
 static size_t g_audio_write_pos = 0;
 static size_t g_audio_read_pos = 0;
 static pthread_mutex_t g_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void libretro_host_clear_audio(void) {
+    pthread_mutex_lock(&g_audio_mutex);
+    g_audio_write_pos = 0;
+    g_audio_read_pos = 0;
+    pthread_mutex_unlock(&g_audio_mutex);
+}
 
 // Audio sample callbacks
 static void core_audio_sample_cb(int16_t left, int16_t right) {
@@ -121,6 +128,14 @@ static void core_audio_sample_cb(int16_t left, int16_t right) {
     g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
     g_audio_ring_buffer[g_audio_write_pos] = right;
     g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+
+    // Latency limiter: Drop stale audio if backlog exceeds ~30ms (2048 samples)
+    size_t available = (g_audio_write_pos >= g_audio_read_pos)
+        ? (g_audio_write_pos - g_audio_read_pos)
+        : (AUDIO_RING_BUFFER_SIZE - g_audio_read_pos + g_audio_write_pos);
+    if (available > 2048) {
+        g_audio_read_pos = (g_audio_write_pos + AUDIO_RING_BUFFER_SIZE - 1024) % AUDIO_RING_BUFFER_SIZE;
+    }
     pthread_mutex_unlock(&g_audio_mutex);
 }
 
@@ -132,6 +147,14 @@ static size_t core_audio_sample_batch_cb(const int16_t *data, size_t frames) {
     for (size_t i = 0; i < count; i++) {
         g_audio_ring_buffer[g_audio_write_pos] = data[i];
         g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+    }
+
+    // Latency limiter: Drop stale audio if backlog exceeds ~30ms (2048 samples)
+    size_t available = (g_audio_write_pos >= g_audio_read_pos)
+        ? (g_audio_write_pos - g_audio_read_pos)
+        : (AUDIO_RING_BUFFER_SIZE - g_audio_read_pos + g_audio_write_pos);
+    if (available > 2048) {
+        g_audio_read_pos = (g_audio_write_pos + AUDIO_RING_BUFFER_SIZE - 1024) % AUDIO_RING_BUFFER_SIZE;
     }
     pthread_mutex_unlock(&g_audio_mutex);
     return frames;
@@ -285,6 +308,7 @@ bool libretro_host_load_rom(const char* rom_file_path) {
                 g_audio_sample_rate = av_info.timing.sample_rate;
             }
         }
+        libretro_host_clear_audio();
     }
     return ok;
 }
@@ -422,6 +446,7 @@ bool libretro_host_flush_save_ram(const char* save_path) {
 void libretro_host_reset(void) {
     if (g_core_handle && g_is_game_loaded && p_retro_reset) {
         p_retro_reset();
+        libretro_host_clear_audio();
     }
 }
 
@@ -434,6 +459,7 @@ double libretro_host_get_sample_rate(void) {
 }
 
 void libretro_host_cleanup(void) {
+    libretro_host_clear_audio();
     if (g_is_game_loaded && p_retro_unload_game) {
         p_retro_unload_game();
         g_is_game_loaded = false;

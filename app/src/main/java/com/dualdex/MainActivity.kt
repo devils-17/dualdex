@@ -242,6 +242,8 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 // Load ROM into mGBA core
                 val ok = LibretroHost.nativeLoadRom(localRomFile.absolutePath)
                 if (ok) {
+                    LibretroHost.nativeClearAudio()
+                    audioDriver.updateSampleRate()
                     // Auto-load cartridge battery save (.sav) if present
                     val gameKey = profile.name.ifEmpty { "current_game" }
                     val loadedSave = saveStateManager.loadBatterySave(gameKey)
@@ -427,6 +429,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     override fun onResume() {
         super.onResume()
+        LibretroHost.nativeClearAudio()
         emulatorView?.onResume()
         audioDriver.start()
     }

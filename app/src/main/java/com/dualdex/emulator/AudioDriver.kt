@@ -33,13 +33,13 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
                 AudioFormat.CHANNEL_OUT_STEREO,
                 AudioFormat.ENCODING_PCM_16BIT
             )
-            val bufferSize = maxOf(minBufferSize, 4096)
+            val bufferSize = minBufferSize.coerceAtLeast(2048)
 
-            audioTrack = AudioTrack.Builder()
+            val builder = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_GAME)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
                 .setAudioFormat(
@@ -51,8 +51,12 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
                 )
                 .setBufferSizeInBytes(bufferSize)
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
 
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            }
+
+            audioTrack = builder.build()
             audioTrack?.play()
             isRunning = true
 
@@ -60,9 +64,9 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
             val resampleRatio = if (needsResample) coreRate.toDouble() / effectiveRate.toDouble() else 1.0
 
             audioThread = Thread({
-                val rawBuf = ShortArray(2048)
+                val rawBuf = ShortArray(1024)
                 val resampleBuf = if (needsResample) {
-                    val maxCapacity = (2048 * (effectiveRate.toDouble() / coreRate.toDouble()) + 128).toInt()
+                    val maxCapacity = (1024 * (effectiveRate.toDouble() / coreRate.toDouble()) + 128).toInt()
                     ShortArray(maxCapacity)
                 } else rawBuf
 
@@ -102,7 +106,7 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
                         }
                     } else {
                         try {
-                            Thread.sleep(4)
+                            Thread.sleep(1)
                         } catch (e: InterruptedException) {
                             break
                         }
@@ -117,6 +121,11 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
         } catch (e: Exception) {
             Log.e("DualDexAudio", "Failed to start AudioDriver: ${e.message}")
         }
+    }
+
+    fun updateSampleRate() {
+        stop()
+        start()
     }
 
     fun stop() {

@@ -204,37 +204,74 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
     uint32_t decrypted_words[12];
     const uint8_t* raw_subs = raw->raw_substructures;
 
+    // Attempt A: Standard GBA encryption (XOR with pid ^ otid)
     for (int i = 0; i < 12; i++) {
         uint32_t word = read32_le(raw_subs + (i * 4));
         decrypted_words[i] = word ^ key;
     }
 
-    // 2. Validate Checksum over 24 16-bit half-words
+    // Checksum verification
     uint16_t calc_checksum = 0;
     const uint8_t* dec_u8 = (const uint8_t*)decrypted_words;
     for (int i = 0; i < 24; i++) {
         calc_checksum += read16_le(dec_u8 + (i * 2));
     }
 
+    uint32_t order = raw->pid % 24;
+
     if (calc_checksum != raw->checksum) {
-        out->is_valid = false;
-        return false;
+        // Attempt B: Unencrypted substructures (key = 0, as in some decompilation hacks)
+        uint16_t raw_checksum = 0;
+        for (int i = 0; i < 24; i++) {
+            raw_checksum += read16_le(raw_subs + (i * 2));
+        }
+
+        if (raw_checksum == raw->checksum) {
+            for (int i = 0; i < 12; i++) {
+                decrypted_words[i] = read32_le(raw_subs + (i * 4));
+            }
+            calc_checksum = raw_checksum;
+        } else {
+            // Attempt C: Dynamic inspection for in-battle or modified checksum hacks
+            const uint8_t* g_enc = dec_u8 + (SUBSTRUCT_BLOCK_INDEX[order][0] * 12);
+            uint16_t spec_enc = read16_le(g_enc) & 0x07FF;
+
+            const uint8_t* g_raw = raw_subs + (SUBSTRUCT_BLOCK_INDEX[order][0] * 12);
+            uint16_t spec_raw = read16_le(g_raw) & 0x07FF;
+
+            if (spec_enc > 0 && spec_enc < 2000) {
+                // Encrypted version yields valid Pokemon
+            } else if (spec_raw > 0 && spec_raw < 2000) {
+                // Unencrypted version yields valid Pokemon
+                for (int i = 0; i < 12; i++) {
+                    decrypted_words[i] = read32_le(raw_subs + (i * 4));
+                }
+            } else {
+                out->is_valid = false;
+                return false;
+            }
+        }
     }
     out->is_valid = true;
 
-    // 3. Locate substructures G, A, E, M using permutation table
-    uint32_t order = raw->pid % 24;
+    // Locate substructures G, A, E, M using permutation table
     const uint8_t* dec_bytes = (const uint8_t*)decrypted_words;
-
     const uint8_t* g_ptr = dec_bytes + (SUBSTRUCT_BLOCK_INDEX[order][0] * 12);
     const uint8_t* a_ptr = dec_bytes + (SUBSTRUCT_BLOCK_INDEX[order][1] * 12);
     const uint8_t* e_ptr = dec_bytes + (SUBSTRUCT_BLOCK_INDEX[order][2] * 12);
     const uint8_t* m_ptr = dec_bytes + (SUBSTRUCT_BLOCK_INDEX[order][3] * 12);
 
     // 4. Growth (G)
-    out->species = read16_le(g_ptr + 0);
-    out->held_item = read16_le(g_ptr + 2);
-    out->experience = read32_le(g_ptr + 4);
+    // In pokeemerald-expansion: species is 11 bits (0..2047), bits 11..15 are teraType (0..30)
+    uint16_t raw_species = read16_le(g_ptr + 0);
+    out->species = raw_species & 0x07FF;
+
+    uint16_t raw_item = read16_le(g_ptr + 2);
+    out->held_item = (raw_species >= 2048) ? (raw_item & 0x03FF) : raw_item;
+
+    uint32_t raw_exp = read32_le(g_ptr + 4);
+    out->experience = (raw_species >= 2048) ? (raw_exp & 0x001FFFFF) : raw_exp;
+
     uint8_t pp_bonuses = g_ptr[8];
     out->pp_bonuses[0] = (pp_bonuses >> 0) & 0x03;
     out->pp_bonuses[1] = (pp_bonuses >> 2) & 0x03;
@@ -243,9 +280,11 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
     out->friendship = g_ptr[9];
 
     // 5. Attacks (A)
+    // In pokeemerald-expansion: each move is 11 bits (0..2047), evolutionTracker in upper bits
     for (int i = 0; i < 4; i++) {
-        out->moves[i] = read16_le(a_ptr + (i * 2));
-        out->pp[i] = a_ptr[8 + i];
+        uint16_t raw_move = read16_le(a_ptr + (i * 2));
+        out->moves[i] = raw_move & 0x07FF;
+        out->pp[i] = a_ptr[8 + i] & 0x7F;
     }
 
     // 6. EVs (E)
@@ -286,12 +325,21 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
         out->speed = raw->speed;
         out->sp_attack = raw->sp_attack;
         out->sp_defense = raw->sp_defense;
+
+        if (out->level == 0 && out->species > 0) {
+            out->level = 1;
+        }
+        if (out->max_hp == 0 && out->species > 0) {
+            out->max_hp = 20;
+            out->current_hp = 20;
+        }
     } else {
         out->level = 0;
     }
 
-    return true;
+    return (out->species > 0 && out->species < 2000);
 }
+
 static uint32_t s_cached_player_party_offset = 0;
 static uint32_t s_cached_enemy_party_offset = 0;
 
@@ -308,28 +356,29 @@ uint8_t pokemon_scan_ewram_for_party(
     for (size_t off = 0; off <= max_offset; off += 4) {
         const RawGbaPokemon* raw = (const RawGbaPokemon*)(ewram + off);
 
-        // Fast filter checks
+        // Fast rejection filter
         if (raw->pid == 0 || raw->otid == 0) continue;
-        if (raw->level == 0 || raw->level > 100) continue;
-        if (raw->max_hp == 0 || raw->max_hp > 2000) continue;
-        if (raw->current_hp > raw->max_hp) continue;
+        if (raw->max_hp > 2000) continue;
+        if (raw->max_hp > 0 && raw->current_hp > raw->max_hp) continue;
+        if (raw->level > 100) continue;
 
-        // Substructure checksum validation
+        // Substructure decryption & parsing
         ParsedPokemon test_mon;
         if (!pokemon_parse_single((const uint8_t*)raw, true, &test_mon)) continue;
         if (test_mon.species == 0 || test_mon.species >= 2000) continue;
 
-        // Ensure this is slot 0 of the party, not slot 1-5
+        // Ensure this is slot 0 of the party, not slot 1-5.
+        // If the preceding 100 bytes is ALREADY a valid party Pokemon, skip 'off'
         if (off >= sizeof(RawGbaPokemon)) {
             ParsedPokemon prev_mon;
             if (pokemon_parse_single(ewram + off - sizeof(RawGbaPokemon), true, &prev_mon)) {
-                if (prev_mon.tid == test_mon.tid && prev_mon.sid == test_mon.sid && prev_mon.species > 0 && prev_mon.species < 2000) {
-                    continue;
+                if (prev_mon.species > 0 && prev_mon.species < 2000) {
+                    continue; // Skip: preceding slot is part of the party
                 }
             }
         }
 
-        // 'off' is gPlayerParty[0]
+        // 'off' is gPlayerParty[0]!
         uint8_t count = 0;
         out_snapshot->members[count++] = test_mon;
 
@@ -346,6 +395,7 @@ uint8_t pokemon_scan_ewram_for_party(
 
         out_snapshot->count = count;
         s_cached_player_party_offset = (uint32_t)off;
+        s_cached_enemy_party_offset = (uint32_t)(off + (6 * sizeof(RawGbaPokemon)));
         return count;
     }
 
@@ -468,9 +518,9 @@ uint8_t pokemon_read_enemy_party(
             if (off == s_cached_player_party_offset) continue;
             const RawGbaPokemon* raw = (const RawGbaPokemon*)(ewram + off);
             if (raw->pid == 0 || raw->otid == player_otid) continue;
-            if (raw->level == 0 || raw->level > 100) continue;
-            if (raw->max_hp == 0 || raw->max_hp > 2000) continue;
-            if (raw->current_hp > raw->max_hp) continue;
+            if (raw->max_hp > 2000) continue;
+            if (raw->max_hp > 0 && raw->current_hp > raw->max_hp) continue;
+            if (raw->level > 100) continue;
 
             ParsedPokemon test_mon;
             if (!pokemon_parse_single((const uint8_t*)raw, true, &test_mon)) continue;
@@ -480,7 +530,7 @@ uint8_t pokemon_read_enemy_party(
             if (off >= sizeof(RawGbaPokemon)) {
                 ParsedPokemon prev_mon;
                 if (pokemon_parse_single(ewram + off - sizeof(RawGbaPokemon), true, &prev_mon)) {
-                    if (prev_mon.tid == test_mon.tid && prev_mon.sid == test_mon.sid && prev_mon.species > 0 && prev_mon.species < 2000) {
+                    if (prev_mon.species > 0 && prev_mon.species < 2000) {
                         continue;
                     }
                 }
