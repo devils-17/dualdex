@@ -13,7 +13,12 @@ object RomHackDetector {
         var sha256 = ""
         try {
             FileInputStream(romFile).use { fis ->
-                fis.read(headerBytes)
+                var offset = 0
+                while (offset < headerBytes.size) {
+                    val read = fis.read(headerBytes, offset, headerBytes.size - offset)
+                    if (read == -1) break
+                    offset += read
+                }
             }
             sha256 = calculateSha256(romFile)
         } catch (e: Exception) {

@@ -27,10 +27,16 @@ data class CalcMoveInput(
     val isCrit: Boolean = false
 )
 
+data class SideConditions(
+    val isReflect: Boolean = false,
+    val isLightScreen: Boolean = false
+)
+
 data class CalcFieldInput(
     val gameType: String = "singles",
     val weather: String? = null,
-    val terrain: String? = null
+    val terrain: String? = null,
+    val defenderSide: SideConditions? = null
 )
 
 data class DamageCalculationRequest(

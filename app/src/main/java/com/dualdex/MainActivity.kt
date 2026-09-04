@@ -14,6 +14,7 @@ import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.dualdex.calculator.DamageCalculator
 import com.dualdex.companion.CompanionPresentation
 import com.dualdex.companion.CompanionViewModel
@@ -94,37 +95,48 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
     }
 
     private fun handleSelectedRom(uri: Uri) {
-        try {
-            // Copy URI stream to a local cache file for Libretro dlopen/fopen access
-            val romsDir = File(filesDir, "roms").apply { if (!exists()) mkdirs() }
-            val localRomFile = File(romsDir, "current_game.gba")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // Copy URI stream to a local cache file for Libretro dlopen/fopen access
+                val romsDir = File(filesDir, "roms").apply { if (!exists()) mkdirs() }
+                val localRomFile = File(romsDir, "current_game.gba")
+                if (localRomFile.exists()) localRomFile.delete()
 
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(localRomFile).use { output ->
-                    input.copyTo(output)
+                val bytesCopied = contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(localRomFile).use { output ->
+                        input.copyTo(output)
+                    }
+                } ?: 0L
+
+                if (!localRomFile.exists() || localRomFile.length() == 0L || bytesCopied == 0L) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "Failed to read ROM file", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                // Detect ROM Hack Profile via SHA-256 and header title
+                val profile = RomHackDetector.detectProfile(localRomFile, loadedProfiles)
+                withContext(Dispatchers.Main) {
+                    viewModel.setProfile(profile)
+                }
+                Log.i("DualDex", "Detected ROM Hack Profile: ${profile.name} (Engine: ${profile.engine}, GameId: ${profile.gameId})")
+
+                // Load ROM into mGBA core
+                val ok = LibretroHost.nativeLoadRom(localRomFile.absolutePath)
+                withContext(Dispatchers.Main) {
+                    if (ok) {
+                        Toast.makeText(this@MainActivity, "Loaded: ${profile.name} (${profile.engine})", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Failed to load ROM in mGBA core", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Error opening ROM: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
-
-            if (!localRomFile.exists() || localRomFile.length() == 0L) {
-                Toast.makeText(this, "Failed to read ROM file", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            // Detect ROM Hack Profile via SHA-256 and header title
-            val profile = RomHackDetector.detectProfile(localRomFile, loadedProfiles)
-            viewModel.setProfile(profile)
-            Log.i("DualDex", "Detected ROM Hack Profile: ${profile.name} (Engine: ${profile.engine}, GameId: ${profile.gameId})")
-
-            // Load ROM into mGBA core
-            val ok = LibretroHost.nativeLoadRom(localRomFile.absolutePath)
-            if (ok) {
-                Toast.makeText(this, "Loaded: ${profile.name} (${profile.engine})", Toast.LENGTH_LONG).show()
-            } else {
-                Toast.makeText(this, "Failed to load ROM in mGBA core", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Error opening ROM: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -230,6 +242,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     override fun onPause() {
         super.onPause()
+        emulatorView?.onPause()
         audioDriver.stop()
         // Auto-save quick state on pause
         val gameKey = viewModel.activeRomTitle.value
@@ -240,6 +253,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     override fun onResume() {
         super.onResume()
+        emulatorView?.onResume()
         audioDriver.start()
     }
 
@@ -250,6 +264,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
         displayManager?.unregisterDisplayListener(this)
         companionPresentation?.dismiss()
         companionPresentation = null
+        emulatorView?.onPause()
         LibretroHost.nativeCleanup()
     }
 }

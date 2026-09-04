@@ -146,4 +146,14 @@ class DocsScreenView(
         content.addView(card)
         offlineGuideContainer.addView(content)
     }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        try {
+            webView.stopLoading()
+            webView.destroy()
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
 }

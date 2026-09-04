@@ -13,9 +13,13 @@ object ProfileLoader {
             val files = assetManager.list("profiles") ?: emptyArray()
             for (filename in files) {
                 if (filename.endsWith(".json")) {
-                    val jsonStr = assetManager.open("profiles/$filename").bufferedReader().use { it.readText() }
-                    val profile = parseProfile(jsonStr)
-                    profiles.add(profile)
+                    try {
+                        val jsonStr = assetManager.open("profiles/$filename").bufferedReader().use { it.readText() }
+                        val profile = parseProfile(jsonStr)
+                        profiles.add(profile)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
         } catch (e: Exception) {

@@ -2,7 +2,7 @@
   "id": "radical_red",
   "name": "Pokemon Radical Red",
   "baseGame": "FireRed",
-  "gameId": 5,
+  "gameId": 7,
   "developer": "Soupercell",
   "engine": "CFRU",
   "hasEvs": true,

@@ -69,7 +69,7 @@ object NatureTable {
     )
 
     fun get(natureId: Int): NatureInfo {
-        val safeId = if (natureId in 0..24) natureId else (natureId % 25)
+        val safeId = if (natureId in 0..24) natureId else ((natureId % 25 + 25) % 25)
         return natures[safeId]
     }
 

@@ -11,7 +11,7 @@ object DamageCalculator {
         System.loadLibrary("dualdex_native")
     }
 
-    private var isInitialized = false
+    @Volatile private var isInitialized = false
 
     private external fun nativeInit(bundleJs: String): Boolean
     private external fun nativeCalculate(inputJson: String): String?
@@ -31,6 +31,7 @@ object DamageCalculator {
     }
 
     fun calculate(request: DamageCalculationRequest): DamageCalculationResponse {
+        if (!isInitialized) return DamageCalculationResponse(success = false, error = "Calculator not initialized")
         val reqJson = JSONObject().apply {
             put("gen", request.gen)
 
@@ -108,6 +109,12 @@ object DamageCalculator {
                 put("gameType", request.field.gameType)
                 request.field.weather?.let { put("weather", it) }
                 request.field.terrain?.let { put("terrain", it) }
+                request.field.defenderSide?.let { side ->
+                    put("defenderSide", JSONObject().apply {
+                        if (side.isReflect) put("isReflect", true)
+                        if (side.isLightScreen) put("isLightScreen", true)
+                    })
+                }
             }
             put("field", fieldObj)
         }
@@ -156,7 +163,7 @@ object DamageCalculator {
         val req = DamageCalculationRequest(
             gen = gen,
             attacker = CalcPokemonInput(
-                species = attacker.nickname.ifEmpty { "Bulbasaur" },
+                species = com.dualdex.pokemon.SpeciesDatabase.get(attacker.species).name,
                 level = attacker.level,
                 nature = attacker.natureName,
                 ivs = StatBlock(attacker.hpIv, attacker.attackIv, attacker.defenseIv, attacker.spAttackIv, attacker.spDefenseIv, attacker.speedIv),

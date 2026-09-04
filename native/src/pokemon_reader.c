@@ -129,18 +129,22 @@ const char* pokemon_get_nature_name(uint8_t nature_index) {
 GbaGameId pokemon_detect_game(const char* rom_title_16) {
     if (!rom_title_16) return GAME_UNKNOWN;
 
+    char title_buf[17] = {0};
+    strncpy(title_buf, rom_title_16, 16);
+    title_buf[16] = '\0';
+
     // Check title in ROM header (offset 0xA0)
-    if (strncmp(rom_title_16, "POKEMON EMER", 12) == 0) return GAME_EMERALD;
-    if (strncmp(rom_title_16, "POKEMON FIRE", 12) == 0) return GAME_FIRERED;
-    if (strncmp(rom_title_16, "POKEMON LEAF", 12) == 0) return GAME_LEAFGREEN;
-    if (strncmp(rom_title_16, "POKEMON RUBY", 12) == 0) return GAME_RUBY;
-    if (strncmp(rom_title_16, "POKEMON SAPP", 12) == 0) return GAME_SAPPHIRE;
+    if (strncmp(title_buf, "POKEMON EMER", 12) == 0) return GAME_EMERALD;
+    if (strncmp(title_buf, "POKEMON FIRE", 12) == 0) return GAME_FIRERED;
+    if (strncmp(title_buf, "POKEMON LEAF", 12) == 0) return GAME_LEAFGREEN;
+    if (strncmp(title_buf, "POKEMON RUBY", 12) == 0) return GAME_RUBY;
+    if (strncmp(title_buf, "POKEMON SAPP", 12) == 0) return GAME_SAPPHIRE;
 
     // Check custom hack headers if present
-    if (strstr(rom_title_16, "GHOST") != NULL || strstr(rom_title_16, "GREY") != NULL) {
+    if (strstr(title_buf, "GHOST") != NULL || strstr(title_buf, "GREY") != NULL) {
         return GAME_GHOST_GREY;
     }
-    if (strstr(rom_title_16, "RADICAL") != NULL) {
+    if (strstr(title_buf, "RADICAL") != NULL) {
         return GAME_RADICAL_RED;
     }
 
@@ -203,10 +207,10 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
     }
 
     // 2. Validate Checksum over 24 16-bit half-words
-    const uint16_t* half_words = (const uint16_t*)decrypted_words;
     uint16_t calc_checksum = 0;
+    const uint8_t* dec_u8 = (const uint8_t*)decrypted_words;
     for (int i = 0; i < 24; i++) {
-        calc_checksum += half_words[i];
+        calc_checksum += read16_le(dec_u8 + (i * 2));
     }
 
     if (calc_checksum != raw->checksum) {
@@ -309,6 +313,22 @@ uint8_t pokemon_read_player_party(
     for (uint8_t i = 0; i < party_count; i++) {
         const uint8_t* mon_ptr = ewram + config->player_party_offset + (i * sizeof(RawGbaPokemon));
         if (pokemon_parse_single(mon_ptr, true, &out_snapshot->members[valid_count])) {
+            if (!config->has_evs) {
+                out_snapshot->members[valid_count].hp_ev = 0;
+                out_snapshot->members[valid_count].attack_ev = 0;
+                out_snapshot->members[valid_count].defense_ev = 0;
+                out_snapshot->members[valid_count].speed_ev = 0;
+                out_snapshot->members[valid_count].sp_attack_ev = 0;
+                out_snapshot->members[valid_count].sp_defense_ev = 0;
+            }
+            if (!config->has_ivs) {
+                out_snapshot->members[valid_count].hp_iv = 0;
+                out_snapshot->members[valid_count].attack_iv = 0;
+                out_snapshot->members[valid_count].defense_iv = 0;
+                out_snapshot->members[valid_count].speed_iv = 0;
+                out_snapshot->members[valid_count].sp_attack_iv = 0;
+                out_snapshot->members[valid_count].sp_defense_iv = 0;
+            }
             valid_count++;
         }
     }
@@ -339,6 +359,22 @@ uint8_t pokemon_read_enemy_party(
     for (uint8_t i = 0; i < enemy_count; i++) {
         const uint8_t* mon_ptr = ewram + config->enemy_party_offset + (i * sizeof(RawGbaPokemon));
         if (pokemon_parse_single(mon_ptr, true, &out_snapshot->members[valid_count])) {
+            if (!config->has_evs) {
+                out_snapshot->members[valid_count].hp_ev = 0;
+                out_snapshot->members[valid_count].attack_ev = 0;
+                out_snapshot->members[valid_count].defense_ev = 0;
+                out_snapshot->members[valid_count].speed_ev = 0;
+                out_snapshot->members[valid_count].sp_attack_ev = 0;
+                out_snapshot->members[valid_count].sp_defense_ev = 0;
+            }
+            if (!config->has_ivs) {
+                out_snapshot->members[valid_count].hp_iv = 0;
+                out_snapshot->members[valid_count].attack_iv = 0;
+                out_snapshot->members[valid_count].defense_iv = 0;
+                out_snapshot->members[valid_count].speed_iv = 0;
+                out_snapshot->members[valid_count].sp_attack_iv = 0;
+                out_snapshot->members[valid_count].sp_defense_iv = 0;
+            }
             valid_count++;
         }
     }

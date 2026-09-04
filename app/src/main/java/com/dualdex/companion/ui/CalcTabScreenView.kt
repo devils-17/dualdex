@@ -232,16 +232,16 @@ class CalcTabScreenView(
         val inBattle = viewModel.isInBattle.value
         if (inBattle && enemyParty.isNotEmpty()) {
             val enemyMon = enemyParty[0]
-            val speciesName = if (enemyMon.nickname.isNotBlank()) enemyMon.nickname else SpeciesDatabase.get(enemyMon.species).name
+            val speciesName = SpeciesDatabase.get(enemyMon.species).name
             selectedDefenderSpecies = speciesName
             defenderHeaderView.text = "🔴 Defender (Opponent In-Battle): $selectedDefenderSpecies (Lv. ${enemyMon.level})"
         } else {
             defenderHeaderView.text = "🔴 Defender: $selectedDefenderSpecies (Lv. 50)"
         }
 
-        val atkName = attacker?.nickname?.ifEmpty { null }
-            ?: attacker?.let { SpeciesDatabase.get(it.species).name }
-            ?: "Salamence"
+        val atkName = attacker?.let {
+            if (it.nickname.isNotBlank()) "${it.nickname} (${SpeciesDatabase.get(it.species).name})" else SpeciesDatabase.get(it.species).name
+        } ?: "Salamence"
         val atkLevel = attacker?.level ?: 50
 
         attackerHeaderView.text = "🔵 Attacker: $atkName (Lv. $atkLevel)"
@@ -274,7 +274,6 @@ class CalcTabScreenView(
                 setPadding(18, 8, 18, 8)
                 setOnClickListener {
                     selectedMoveName = moveName
-                    recalculate()
                     refreshUI()
                 }
             }
@@ -296,8 +295,7 @@ class CalcTabScreenView(
         val selectedIdx = viewModel.selectedMemberIndex.value
         val attacker = if (party.isNotEmpty() && selectedIdx in party.indices) party[selectedIdx] else null
 
-        val atkSpecies = attacker?.nickname?.ifEmpty { null }
-            ?: attacker?.let { SpeciesDatabase.get(it.species).name }
+        val atkSpecies = attacker?.let { SpeciesDatabase.get(it.species).name }
             ?: "Salamence"
         val atkLevel = attacker?.level ?: 50
 
@@ -316,7 +314,8 @@ class CalcTabScreenView(
             move = CalcMoveInput(name = selectedMoveName, isCrit = isCrit),
             field = CalcFieldInput(
                 weather = currentWeather,
-                gameType = "singles"
+                gameType = "singles",
+                defenderSide = if (hasScreens) SideConditions(isReflect = true, isLightScreen = true) else null
             )
         )
 

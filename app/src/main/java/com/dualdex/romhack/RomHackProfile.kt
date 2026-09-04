@@ -36,7 +36,7 @@ data class RomHackProfile(
             id = "vanilla_firered",
             name = "Pokemon FireRed",
             baseGame = "FireRed",
-            gameId = 1,
+            gameId = 2,
             hasEvs = true,
             hasIvs = true,
             hasPhysSpecSplit = false,

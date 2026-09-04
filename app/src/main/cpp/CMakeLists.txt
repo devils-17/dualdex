@@ -29,6 +29,12 @@ add_library(
     "${NATIVE_ROOT}/quickjs/dtoa.c"
 )
 
+target_compile_options(
+    dualdex_native
+    PRIVATE
+    -fno-strict-aliasing
+)
+
 find_library(log-lib log)
 
 target_link_libraries(

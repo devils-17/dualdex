@@ -2,7 +2,7 @@
   "id": "vanilla_emerald",
   "name": "Pokemon Emerald",
   "baseGame": "Emerald",
-  "gameId": 0,
+  "gameId": 1,
   "developer": "Game Freak",
   "engine": "Vanilla",
   "hasEvs": true,

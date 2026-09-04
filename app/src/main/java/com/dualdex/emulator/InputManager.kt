@@ -1,6 +1,9 @@
 package com.dualdex.emulator
 
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
+import kotlin.math.abs
 
 class InputManager {
 
@@ -21,6 +24,7 @@ class InputManager {
         const val BTN_R2: Int     = 1 shl 13
     }
 
+    @Volatile
     private var currentMask: Int = 0
 
     fun onKeyDown(keyCode: Int): Boolean {
@@ -43,18 +47,44 @@ class InputManager {
         return false
     }
 
+    fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if ((event.source and InputDevice.SOURCE_JOYSTICK) != 0 ||
+            (event.source and InputDevice.SOURCE_GAMEPAD) != 0) {
+
+            val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+            val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+            val stickX = event.getAxisValue(MotionEvent.AXIS_X)
+            val stickY = event.getAxisValue(MotionEvent.AXIS_Y)
+
+            val dx = if (abs(hatX) > 0.2f) hatX else stickX
+            val dy = if (abs(hatY) > 0.2f) hatY else stickY
+
+            var mask = currentMask and (BTN_UP or BTN_DOWN or BTN_LEFT or BTN_RIGHT).inv()
+
+            if (dx < -0.4f) mask = mask or BTN_LEFT
+            if (dx > 0.4f) mask = mask or BTN_RIGHT
+            if (dy < -0.4f) mask = mask or BTN_UP
+            if (dy > 0.4f) mask = mask or BTN_DOWN
+
+            currentMask = mask
+            LibretroHost.nativeSetInputButtons(currentMask)
+            return true
+        }
+        return false
+    }
+
     private fun mapKeyCodeToMask(keyCode: Int): Int {
         return when (keyCode) {
-            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER -> BTN_A
-            KeyEvent.KEYCODE_BUTTON_B -> BTN_B
-            KeyEvent.KEYCODE_BUTTON_X -> BTN_X
-            KeyEvent.KEYCODE_BUTTON_Y -> BTN_Y
-            KeyEvent.KEYCODE_BUTTON_L1 -> BTN_L
-            KeyEvent.KEYCODE_BUTTON_R1 -> BTN_R
+            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_Z -> BTN_A
+            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_X -> BTN_B
+            KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_C -> BTN_X
+            KeyEvent.KEYCODE_BUTTON_Y, KeyEvent.KEYCODE_V -> BTN_Y
+            KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_A -> BTN_L
+            KeyEvent.KEYCODE_BUTTON_R1, KeyEvent.KEYCODE_S -> BTN_R
             KeyEvent.KEYCODE_BUTTON_L2 -> BTN_L2
             KeyEvent.KEYCODE_BUTTON_R2 -> BTN_R2
-            KeyEvent.KEYCODE_BUTTON_START -> BTN_START
-            KeyEvent.KEYCODE_BUTTON_SELECT -> BTN_SELECT
+            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_ENTER -> BTN_START
+            KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_SPACE -> BTN_SELECT
             KeyEvent.KEYCODE_DPAD_UP -> BTN_UP
             KeyEvent.KEYCODE_DPAD_DOWN -> BTN_DOWN
             KeyEvent.KEYCODE_DPAD_LEFT -> BTN_LEFT

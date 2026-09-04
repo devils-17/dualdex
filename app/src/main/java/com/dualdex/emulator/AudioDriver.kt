@@ -8,7 +8,7 @@ import android.util.Log
 class AudioDriver(private val sampleRate: Int = 32768) {
 
     private var audioTrack: AudioTrack? = null
-    private var isRunning = false
+    @Volatile private var isRunning = false
     private var audioThread: Thread? = null
 
     fun start() {
@@ -56,7 +56,11 @@ class AudioDriver(private val sampleRate: Int = 32768) {
                 while (isRunning) {
                     val count = LibretroHost.nativeGetAudioSamples(sampleBuf)
                     if (count > 0) {
-                        audioTrack?.write(sampleBuf, 0, count)
+                        try {
+                            audioTrack?.write(sampleBuf, 0, count)
+                        } catch (e: Exception) {
+                            // ignore
+                        }
                     } else {
                         try {
                             Thread.sleep(4)
@@ -79,6 +83,7 @@ class AudioDriver(private val sampleRate: Int = 32768) {
     fun stop() {
         isRunning = false
         audioThread?.interrupt()
+        audioThread?.join(500)
         audioThread = null
         try {
             audioTrack?.stop()

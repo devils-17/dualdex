@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <android/log.h>
 
 static JSRuntime* g_rt = NULL;
 static JSContext* g_ctx = NULL;
@@ -57,6 +58,7 @@ char* js_calc_calculate(const char* input_json_str) {
 
     JSValue calc_func = JS_GetPropertyStr(g_ctx, calc_obj, "calculateDamage");
     if (!JS_IsFunction(g_ctx, calc_func)) {
+        JS_FreeValue(g_ctx, calc_func);
         JS_FreeValue(g_ctx, calc_obj);
         JS_FreeValue(g_ctx, global);
         return NULL;
@@ -76,10 +78,12 @@ char* js_calc_calculate(const char* input_json_str) {
         JSValue exc = JS_GetException(g_ctx);
         const char* exc_str = JS_ToCString(g_ctx, exc);
         if (exc_str) {
-            out_str = strdup(exc_str);
+            // Log the error but don't return raw string as it's not JSON
+            __android_log_print(ANDROID_LOG_ERROR, "DualDex_JNI", "QuickJS calc error: %s", exc_str);
             JS_FreeCString(g_ctx, exc_str);
         }
         JS_FreeValue(g_ctx, exc);
+        // Return NULL to signal error to caller
     }
 
     JS_FreeValue(g_ctx, res);

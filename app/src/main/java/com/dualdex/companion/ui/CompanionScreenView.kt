@@ -29,7 +29,7 @@ class CompanionScreenView(
 
     private val partyView: PartyScreenView by lazy { PartyScreenView(context, viewModel) }
     private val calcView: CalcTabScreenView by lazy { CalcTabScreenView(context, viewModel) }
-    private val typesView: TypeChartScreenView by lazy { TypeChartScreenView(context) }
+    private val typesView: TypeChartScreenView by lazy { TypeChartScreenView(context, viewModel) }
     private val docsView: DocsScreenView by lazy { DocsScreenView(context, viewModel) }
     private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel) }
     private val assistantView: com.dualdex.assistant.AssistantScreenView by lazy { com.dualdex.assistant.AssistantScreenView(context, viewModel) }
@@ -174,6 +174,7 @@ class CompanionScreenView(
             profileLabel.text = "⚡ ${prof.name}"
             if (viewModel.selectedTab.value == CompanionTab.PARTY) partyView.refreshUI()
             if (viewModel.selectedTab.value == CompanionTab.CALC) calcView.refreshUI()
+            if (viewModel.selectedTab.value == CompanionTab.TYPES) typesView.updateMatchupDisplay()
             if (viewModel.selectedTab.value == CompanionTab.SAVES) savesView.refreshUI()
         }
     }

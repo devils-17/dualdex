@@ -23,6 +23,7 @@ static void init_class_cache(JNIEnv* env) {
         jclass local_cls = (*env)->FindClass(env, "com/dualdex/pokemon/ParsedPokemon");
         if (!local_cls) {
             LOGE("Failed to find com.dualdex.pokemon.ParsedPokemon");
+            (*env)->ExceptionClear(env);
             return;
         }
         g_parsed_pokemon_cls = (jclass)(*env)->NewGlobalRef(env, local_cls);
@@ -39,6 +40,7 @@ static void init_class_cache(JNIEnv* env) {
 
         if (!g_parsed_pokemon_ctor) {
             LOGE("Failed to find ParsedPokemon constructor with signature: %s", PARSED_POKEMON_SIG);
+            (*env)->ExceptionClear(env);
         } else {
             LOGI("ParsedPokemon constructor resolved successfully");
         }
@@ -69,11 +71,13 @@ static jobject create_parsed_pokemon_object(JNIEnv* env, const ParsedPokemon* p)
     jstring j_nature_name = (*env)->NewStringUTF(env, p->nature_name ? p->nature_name : "");
 
     jintArray j_moves = (*env)->NewIntArray(env, 4);
+    if (!j_moves) return NULL;
     jint moves_buf[4];
     for (int i = 0; i < 4; i++) moves_buf[i] = p->moves[i];
     (*env)->SetIntArrayRegion(env, j_moves, 0, 4, moves_buf);
 
     jintArray j_pp = (*env)->NewIntArray(env, 4);
+    if (!j_pp) { (*env)->DeleteLocalRef(env, j_moves); return NULL; }
     jint pp_buf[4];
     for (int i = 0; i < 4; i++) pp_buf[i] = p->pp[i];
     (*env)->SetIntArrayRegion(env, j_pp, 0, 4, pp_buf);
@@ -195,6 +199,7 @@ Java_com_dualdex_pokemon_PokemonBridge_readPlayerParty(
     (*env)->ReleaseByteArrayElements(env, ewram_bytes, bytes, JNI_ABORT);
 
     jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
+    if (!array) return NULL;
     for (uint8_t i = 0; i < count; i++) {
         jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
         if (p_obj) {
@@ -230,6 +235,7 @@ Java_com_dualdex_pokemon_PokemonBridge_readEnemyParty(
     (*env)->ReleaseByteArrayElements(env, ewram_bytes, bytes, JNI_ABORT);
 
     jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
+    if (!array) return NULL;
     for (uint8_t i = 0; i < count; i++) {
         jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
         if (p_obj) {
@@ -299,7 +305,14 @@ Java_com_dualdex_emulator_LibretroHost_nativeGetVideoFrame(
     void* dst = (*env)->GetDirectBufferAddress(env, direct_buffer);
     if (!dst) return JNI_FALSE;
 
-    memcpy(dst, frame.pixels, frame.pitch * frame.height);
+    jlong dst_capacity = (*env)->GetDirectBufferCapacity(env, direct_buffer);
+    size_t copy_size = (size_t)(frame.pitch * frame.height);
+    if (dst_capacity < 0 || copy_size > (size_t)dst_capacity) {
+        copy_size = (dst_capacity > 0) ? (size_t)dst_capacity : 0;
+    }
+    if (copy_size > 0) {
+        memcpy(dst, frame.pixels, copy_size);
+    }
 
     if (out_metadata) {
         jint meta[4] = {
@@ -349,6 +362,39 @@ Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobj
     uint8_t count = pokemon_read_player_party(ewram, ewram_sz, cfg, &snapshot);
 
     jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
+    if (!array) return NULL;
+    for (uint8_t i = 0; i < count; i++) {
+        jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
+        if (p_obj) {
+            (*env)->SetObjectArrayElement(env, array, i, p_obj);
+            (*env)->DeleteLocalRef(env, p_obj);
+        }
+    }
+
+    return array;
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeReadEnemyPartyFromCore(JNIEnv* env, jobject thiz, jint game_id) {
+    (void)thiz;
+    init_class_cache(env);
+    if (!g_parsed_pokemon_cls) {
+        LOGE("nativeReadEnemyPartyFromCore: g_parsed_pokemon_cls is NULL!");
+        return NULL;
+    }
+
+    size_t ewram_sz = 0;
+    uint8_t* ewram = libretro_host_get_ewram(&ewram_sz);
+    if (!ewram || ewram_sz == 0) {
+        return (*env)->NewObjectArray(env, 0, g_parsed_pokemon_cls, NULL);
+    }
+
+    const GameMemoryConfig* cfg = pokemon_get_game_config((GbaGameId)game_id);
+    PartySnapshot snapshot;
+    uint8_t count = pokemon_read_enemy_party(ewram, ewram_sz, cfg, &snapshot);
+
+    jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
+    if (!array) return NULL;
     for (uint8_t i = 0; i < count; i++) {
         jobject p_obj = create_parsed_pokemon_object(env, &snapshot.members[i]);
         if (p_obj) {

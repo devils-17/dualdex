@@ -227,7 +227,7 @@ class EmulatorSurfaceView @JvmOverloads constructor(
         }
 
         // Render with active shader filter
-        activeProgram = programMap[currentFilter] ?: programMap[ShaderFilter.NEAREST]!!
+        activeProgram = programMap[currentFilter] ?: programMap[ShaderFilter.NEAREST] ?: return
         GLES20.glUseProgram(activeProgram)
 
         val posHandle = GLES20.glGetAttribLocation(activeProgram, "aPosition")
@@ -263,6 +263,11 @@ class EmulatorSurfaceView @JvmOverloads constructor(
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
         if (inputManager.onKeyUp(keyCode)) return true
         return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+        if (inputManager.onGenericMotionEvent(event)) return true
+        return super.onGenericMotionEvent(event)
     }
 
     private fun loadShader(type: Int, shaderCode: String): Int {

@@ -12,6 +12,7 @@ import android.widget.*
 import com.dualdex.companion.CompanionViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class AssistantScreenView(
@@ -280,5 +281,10 @@ class AssistantScreenView(
 
         messagesContainer.addView(card)
         return card
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        scope.cancel()
     }
 }

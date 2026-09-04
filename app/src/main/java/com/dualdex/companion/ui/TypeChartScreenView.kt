@@ -6,10 +6,14 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.widget.*
+import com.dualdex.companion.CompanionViewModel
 import com.dualdex.pokemon.PokemonType
 import com.dualdex.pokemon.TypeChart
 
-class TypeChartScreenView(context: Context) : LinearLayout(context) {
+class TypeChartScreenView(
+    context: Context,
+    private val viewModel: CompanionViewModel? = null
+) : LinearLayout(context) {
 
     private var selectedType1: PokemonType = PokemonType.FIRE
     private var selectedType2: PokemonType? = PokemonType.FLYING
@@ -112,10 +116,11 @@ class TypeChartScreenView(context: Context) : LinearLayout(context) {
         updateMatchupDisplay()
     }
 
-    private fun updateMatchupDisplay() {
+    fun updateMatchupDisplay() {
         resultContainer.removeAllViews()
 
-        val profile = TypeChart.getDefenseProfile(selectedType1, selectedType2, steelResistsGhostDark)
+        val steelResists = viewModel?.activeProfile?.value?.steelResistsGhostDark ?: steelResistsGhostDark
+        val profile = TypeChart.getDefenseProfile(selectedType1, selectedType2, steelResists)
 
         val headerText = TextView(context).apply {
             val t2Str = selectedType2?.let { " / ${it.displayName}" } ?: ""

@@ -87,10 +87,12 @@ static void core_video_refresh_cb(const void *data, unsigned width, unsigned hei
         // Handle stride / pitch difference
         const uint8_t *src_row = (const uint8_t *)data;
         uint8_t *dst_row = g_fb_storage;
+        size_t row_bytes = width * bpp;
         for (unsigned y = 0; y < height; y++) {
-            memcpy(dst_row, src_row, width * bpp);
+            if ((size_t)(dst_row - g_fb_storage) + row_bytes > sizeof(g_fb_storage)) break;
+            memcpy(dst_row, src_row, row_bytes);
             src_row += pitch;
-            dst_row += (width * bpp);
+            dst_row += row_bytes;
         }
     }
 
@@ -322,8 +324,9 @@ bool libretro_host_save_state(const char* save_state_path) {
     if (ok) {
         FILE* f = fopen(save_state_path, "wb");
         if (f) {
-            fwrite(buf, 1, sz, f);
+            size_t written = fwrite(buf, 1, sz, f);
             fclose(f);
+            if (written != sz) ok = false;
         } else {
             ok = false;
         }
@@ -372,4 +375,26 @@ void libretro_host_cleanup(void) {
         dlclose(g_core_handle);
         g_core_handle = NULL;
     }
+    // Reset all function pointers to prevent dangling pointer access
+    p_retro_init = NULL;
+    p_retro_deinit = NULL;
+    p_retro_api_version = NULL;
+    p_retro_set_environment = NULL;
+    p_retro_set_video_refresh = NULL;
+    p_retro_set_audio_sample = NULL;
+    p_retro_set_audio_sample_batch = NULL;
+    p_retro_set_input_poll = NULL;
+    p_retro_set_input_state = NULL;
+    p_retro_set_controller_port_device = NULL;
+    p_retro_reset = NULL;
+    p_retro_run = NULL;
+    p_retro_serialize_size = NULL;
+    p_retro_serialize = NULL;
+    p_retro_unserialize = NULL;
+    p_retro_load_game = NULL;
+    p_retro_unload_game = NULL;
+    p_retro_get_system_info = NULL;
+    p_retro_get_system_av_info = NULL;
+    p_retro_get_memory_data = NULL;
+    p_retro_get_memory_size = NULL;
 }

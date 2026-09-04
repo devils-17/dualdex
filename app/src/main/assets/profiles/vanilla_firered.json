@@ -2,7 +2,7 @@
   "id": "vanilla_firered",
   "name": "Pokemon FireRed",
   "baseGame": "FireRed",
-  "gameId": 1,
+  "gameId": 2,
   "developer": "Game Freak",
   "engine": "Vanilla",
   "hasEvs": true,

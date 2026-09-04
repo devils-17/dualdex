@@ -84,9 +84,11 @@ class CompanionViewModel(
                         if (playerList.isNotEmpty() || _playerParty.value.isNotEmpty()) {
                             _playerParty.value = playerList
                         }
+                    }
 
-                        // Opponent / In-Battle reading
-                        val enemyList = playerPartyRaw.filter { !it.isEmpty && it.isValid }
+                    val enemyPartyRaw = LibretroHost.nativeReadEnemyPartyFromCore(gameId)
+                    if (enemyPartyRaw != null) {
+                        val enemyList = enemyPartyRaw.filter { !it.isEmpty && it.isValid }
                         _enemyParty.value = enemyList
                         _isInBattle.value = enemyList.isNotEmpty()
                     }
