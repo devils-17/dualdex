@@ -298,6 +298,44 @@ class SettingsScreenView(
             addView(saveKeyBtn, lp)
         }
         content.addView(apiCard)
+
+        // Cheats Quick Access Card
+        val cheatCard = createCardLayout().apply {
+            val label = TextView(context).apply {
+                text = "⚡ Action Replay & Cheats"
+                setTextColor(0xFFFFD700.toInt())
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, 6)
+            }
+            addView(label)
+
+            val desc = TextView(context).apply {
+                text = "Input, toggle, and manage Action Replay, GameShark, and CodeBreaker cheats for the active game."
+                setTextColor(0xFFAAAAAA.toInt())
+                textSize = 12f
+                setPadding(0, 0, 0, 10)
+            }
+            addView(desc)
+
+            val openCheatsBtn = Button(context).apply {
+                text = "⚡ Open Cheats Manager"
+                setTextColor(Color.WHITE)
+                textSize = 12.5f
+                typeface = Typeface.DEFAULT_BOLD
+                background = GradientDrawable().apply {
+                    cornerRadius = 14f
+                    setColor(0xFF2E6B4A.toInt())
+                }
+                setPadding(18, 8, 18, 8)
+                setOnClickListener {
+                    viewModel.selectTab(com.dualdex.companion.CompanionTab.CHEATS)
+                }
+            }
+            val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            addView(openCheatsBtn, lp)
+        }
+        content.addView(cheatCard)
     }
 
     private fun updateShaderButtons(row: LinearLayout, selected: ShaderFilter) {

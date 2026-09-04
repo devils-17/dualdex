@@ -521,6 +521,24 @@ Java_com_dualdex_emulator_LibretroHost_nativeGetAudioSampleRate(JNIEnv* env, job
     return (jdouble)libretro_host_get_sample_rate();
 }
 
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeCheatReset(JNIEnv* env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    libretro_host_cheat_reset();
+}
+
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeCheatSet(JNIEnv* env, jobject thiz, jint index, jboolean enabled, jstring j_code) {
+    (void)thiz;
+    if (!j_code) return;
+    const char* code_str = (*env)->GetStringUTFChars(env, j_code, NULL);
+    if (code_str) {
+        libretro_host_cheat_set((unsigned)index, (bool)enabled, code_str);
+        (*env)->ReleaseStringUTFChars(env, j_code, code_str);
+    }
+}
+
 // -------------------------------------------------------------
 // QuickJS Damage Calculator JNI
 // -------------------------------------------------------------

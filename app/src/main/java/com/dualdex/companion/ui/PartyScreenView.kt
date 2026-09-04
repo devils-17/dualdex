@@ -284,9 +284,12 @@ class PartyScreenView(
             hpRow.addView(hpLabel)
             addView(hpRow)
 
-            // Nature & Ability
+            // Nature & Held Item
+            val isExpansion = (gameId == 1 || (!isGhostGrey && gameId != 2))
+            val itemInfo = ItemDatabase.get(mon.heldItem, isExpansion = isExpansion)
+            val itemDisplay = if (mon.heldItem > 0) "${itemInfo.iconEmoji} ${itemInfo.name}" else "None"
             val metaText = TextView(context).apply {
-                text = "Nature: ${natureInfo.formattedDescription}\nItem: ${if (mon.heldItem > 0) "Item #${mon.heldItem}" else "None"}"
+                text = "Nature: ${natureInfo.formattedDescription}\nHeld Item: $itemDisplay"
                 setTextColor(0xFFCCCCCC.toInt())
                 textSize = 14f
                 setPadding(0, dp(2), 0, dp(2))

@@ -49,6 +49,7 @@ class CompanionScreenView(
     private val calcView: CalcTabScreenView by lazy { CalcTabScreenView(context, viewModel) }
     private val typesView: TypeChartScreenView by lazy { TypeChartScreenView(context, viewModel) }
     private val docsView: DocsScreenView by lazy { DocsScreenView(context, viewModel) }
+    private val cheatsView: CheatsScreenView by lazy { CheatsScreenView(context, viewModel) }
     private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel, onImportSaveRequested, onExportSaveRequested) }
     private val assistantView: com.dualdex.assistant.AssistantScreenView by lazy { com.dualdex.assistant.AssistantScreenView(context, viewModel) }
     private val settingsView: SettingsScreenView by lazy { SettingsScreenView(context, viewModel, onShaderChanged, onSpeedChanged, onStretchChanged) }
@@ -154,12 +155,16 @@ class CompanionScreenView(
         }
         addView(contentContainer)
 
-        // Bottom Tab Navigation Bar
+        // Bottom Tab Navigation Bar (Scrollable to comfortably fit all tabs)
+        val navScroll = android.widget.HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            isFillViewport = true
+            setBackgroundColor(0xFF16161E.toInt())
+        }
         val navBar = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(6, 8, 6, 10)
-            setBackgroundColor(0xFF16161E.toInt())
+            setPadding(6, 6, 6, 8)
         }
 
         CompanionTab.values().forEach { tab ->
@@ -168,8 +173,10 @@ class CompanionScreenView(
                 gravity = Gravity.CENTER
                 textSize = 10.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(8, 6, 8, 6)
-                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
+                setPadding(6, 6, 6, 6)
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                    minimumWidth = (48 * context.resources.displayMetrics.density).toInt()
+                }
                 setOnClickListener {
                     viewModel.selectTab(tab)
                     switchTab(tab)
@@ -178,7 +185,8 @@ class CompanionScreenView(
             tabButtons[tab] = tabBtn
             navBar.addView(tabBtn)
         }
-        addView(navBar)
+        navScroll.addView(navBar)
+        addView(navScroll)
 
         // Initial tab
         switchTab(viewModel.selectedTab.value)
@@ -205,6 +213,10 @@ class CompanionScreenView(
             CompanionTab.DOCS -> {
                 docsView.refreshUI()
                 docsView
+            }
+            CompanionTab.CHEATS -> {
+                cheatsView.refreshUI()
+                cheatsView
             }
             CompanionTab.SAVES -> {
                 savesView.refreshUI()
@@ -242,6 +254,7 @@ class CompanionScreenView(
             if (viewModel.selectedTab.value == CompanionTab.PARTY) partyView.refreshUI()
             if (viewModel.selectedTab.value == CompanionTab.CALC) calcView.refreshUI()
             if (viewModel.selectedTab.value == CompanionTab.TYPES) typesView.updateMatchupDisplay()
+            if (viewModel.selectedTab.value == CompanionTab.CHEATS) cheatsView.refreshUI()
             if (viewModel.selectedTab.value == CompanionTab.SAVES) savesView.refreshUI()
         }
     }

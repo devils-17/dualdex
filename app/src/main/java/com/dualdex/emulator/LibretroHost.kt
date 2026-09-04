@@ -26,5 +26,7 @@ object LibretroHost {
     external fun nativeResetCore()
     external fun nativeGetTargetFps(): Double
     external fun nativeGetAudioSampleRate(): Double
+    external fun nativeCheatReset()
+    external fun nativeCheatSet(index: Int, enabled: Boolean, code: String)
     external fun nativeCleanup()
 }

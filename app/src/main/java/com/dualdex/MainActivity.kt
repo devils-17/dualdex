@@ -250,6 +250,9 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                     if (loadedSave) {
                         Log.i("DualDex", "Restored existing battery save for $gameKey")
                     }
+                    // Auto-apply active cheats for this game
+                    val cheatManager = com.dualdex.cheats.CheatManager(this@MainActivity)
+                    cheatManager.applyCheats(gameKey)
                 }
                 withContext(Dispatchers.Main) {
                     if (ok) {

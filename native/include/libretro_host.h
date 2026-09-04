@@ -132,6 +132,17 @@ void libretro_host_set_target_audio_sample_rate(uint32_t rate);
 uint32_t libretro_host_get_output_sample_rate(void);
 
 /**
+ * Clear all active cheats in emulator core.
+ */
+void libretro_host_cheat_reset(void);
+
+/**
+ * Set or add a cheat code in the emulator core.
+ * Supported formats: Action Replay (AR v3), GameShark, CodeBreaker.
+ */
+void libretro_host_cheat_set(unsigned index, bool enabled, const char* code);
+
+/**
  * Unload ROM and core.
  */
 void libretro_host_cleanup(void);

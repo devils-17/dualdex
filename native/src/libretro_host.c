@@ -29,6 +29,8 @@ static void (*p_retro_get_system_info)(struct retro_system_info*);
 static void (*p_retro_get_system_av_info)(struct retro_system_av_info*);
 static void* (*p_retro_get_memory_data)(unsigned);
 static size_t (*p_retro_get_memory_size)(unsigned);
+static void (*p_retro_cheat_reset)(void);
+static void (*p_retro_cheat_set)(unsigned, bool, const char*);
 
 static void* g_core_handle = NULL;
 static bool g_is_game_loaded = false;
@@ -316,6 +318,9 @@ bool libretro_host_init(const char* core_lib_path) {
     RESOLVE_SYM(retro_get_memory_data);
     RESOLVE_SYM(retro_get_memory_size);
 
+    p_retro_cheat_reset = (void (*)(void))dlsym(g_core_handle, "retro_cheat_reset");
+    p_retro_cheat_set = (void (*)(unsigned, bool, const char*))dlsym(g_core_handle, "retro_cheat_set");
+
     // Initialize core
     p_retro_set_environment(core_environment_cb);
     p_retro_set_video_refresh(core_video_refresh_cb);
@@ -593,4 +598,18 @@ void libretro_host_cleanup(void) {
     p_retro_get_system_av_info = NULL;
     p_retro_get_memory_data = NULL;
     p_retro_get_memory_size = NULL;
+    p_retro_cheat_reset = NULL;
+    p_retro_cheat_set = NULL;
+}
+
+void libretro_host_cheat_reset(void) {
+    if (p_retro_cheat_reset) {
+        p_retro_cheat_reset();
+    }
+}
+
+void libretro_host_cheat_set(unsigned index, bool enabled, const char* code) {
+    if (p_retro_cheat_set && code) {
+        p_retro_cheat_set(index, enabled, code);
+    }
 }
