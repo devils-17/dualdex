@@ -96,7 +96,7 @@ class CompanionViewModel(
                     val gameId = _activeGameId.value
                     val playerPartyRaw = LibretroHost.nativeReadPartyFromCore(gameId)
                     if (playerPartyRaw != null) {
-                        val playerList = playerPartyRaw.filter { !it.isEmpty && it.isValid }
+                        val playerList = playerPartyRaw.filterNotNull().filter { !it.isEmpty && it.isValid }
                         if (playerList.isNotEmpty() || _playerParty.value.isNotEmpty()) {
                             _playerParty.value = playerList
                         }
@@ -104,12 +104,12 @@ class CompanionViewModel(
 
                     val enemyPartyRaw = LibretroHost.nativeReadEnemyPartyFromCore(gameId)
                     if (enemyPartyRaw != null) {
-                        val enemyList = enemyPartyRaw.filter { !it.isEmpty && it.isValid }
+                        val enemyList = enemyPartyRaw.filterNotNull().filter { !it.isEmpty && it.isValid }
                         _enemyParty.value = enemyList
                         _isInBattle.value = enemyList.isNotEmpty()
                     }
                 } catch (e: Throwable) {
-                    // Suppress during core startup/shutdown
+                    android.util.Log.e("DualDex_Companion", "Error in memory poller: ${e.message}", e)
                 }
                 delay(intervalMs)
             }

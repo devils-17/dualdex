@@ -20,6 +20,8 @@ import com.dualdex.emulator.ShaderFilter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 
 class CompanionScreenView(
     context: Context,
@@ -303,15 +305,39 @@ class CompanionScreenView(
         }
     }
 
+    private var viewScope: CoroutineScope? = null
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         updateSystemStatus()
         postDelayed(statusUpdateRunnable, 15000L)
+
+        viewScope?.cancel()
+        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        viewScope = scope
+
+        scope.launch {
+            viewModel.playerParty.collectLatest {
+                notifyPartyUpdated()
+            }
+        }
+        scope.launch {
+            viewModel.activeProfile.collectLatest {
+                notifyProfileChanged()
+            }
+        }
+        scope.launch {
+            viewModel.isInBattle.collectLatest {
+                notifyPartyUpdated()
+            }
+        }
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         removeCallbacks(statusUpdateRunnable)
+        viewScope?.cancel()
+        viewScope = null
     }
 }
 

@@ -104,7 +104,7 @@ class PartyScreenView(
 
         // 2. Build detail card
         detailContainer.removeAllViews()
-        if (party.isEmpty() || selectedIdx !in party.indices) {
+        if (party.isEmpty()) {
             val emptyMsg = TextView(context).apply {
                 text = "=== DualDex Party Monitor ===\n\nWaiting for game to load.\nOnce loaded, live Pokémon stats, IVs, EVs, and matchups will appear here in real-time."
                 setTextColor(0xFFAAAAAA.toInt())
@@ -116,7 +116,8 @@ class PartyScreenView(
             return
         }
 
-        val mon = party[selectedIdx]
+        val safeIdx = if (selectedIdx in party.indices) selectedIdx else 0
+        val mon = party[safeIdx]
         val speciesInfo = SpeciesDatabase.get(mon.species)
         val natureInfo = NatureTable.get(mon.nature)
         val isGhostGrey = (gameId == 6) // GAME_GHOST_GREY

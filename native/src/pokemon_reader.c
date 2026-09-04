@@ -3,6 +3,13 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_PARTY(...) __android_log_print(ANDROID_LOG_INFO, "DualDex_Party", __VA_ARGS__)
+#else
+#define LOG_PARTY(...) do {} while(0)
+#endif
+
 static const char* NATURE_NAMES[25] = {
     "Hardy", "Lonely", "Brave", "Adamant", "Naughty",
     "Bold", "Docile", "Relaxed", "Impish", "Lax",
@@ -232,24 +239,8 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
             }
             calc_checksum = raw_checksum;
         } else {
-            // Attempt C: Dynamic inspection for in-battle or modified checksum hacks
-            const uint8_t* g_enc = dec_u8 + (SUBSTRUCT_BLOCK_INDEX[order][0] * 12);
-            uint16_t spec_enc = read16_le(g_enc) & 0x07FF;
-
-            const uint8_t* g_raw = raw_subs + (SUBSTRUCT_BLOCK_INDEX[order][0] * 12);
-            uint16_t spec_raw = read16_le(g_raw) & 0x07FF;
-
-            if (spec_enc > 0 && spec_enc < 2000) {
-                // Encrypted version yields valid Pokemon
-            } else if (spec_raw > 0 && spec_raw < 2000) {
-                // Unencrypted version yields valid Pokemon
-                for (int i = 0; i < 12; i++) {
-                    decrypted_words[i] = read32_le(raw_subs + (i * 4));
-                }
-            } else {
-                out->is_valid = false;
-                return false;
-            }
+            out->is_valid = false;
+            return false;
         }
     }
     out->is_valid = true;
@@ -401,6 +392,8 @@ uint8_t pokemon_scan_ewram_for_party(
         out_snapshot->count = count;
         s_cached_player_party_offset = (uint32_t)off;
         s_cached_enemy_party_offset = (uint32_t)(off + (6 * sizeof(RawGbaPokemon)));
+        LOG_PARTY("EWRAM scan found party at offset 0x%X (count=%d, lead='%s', species=%d, lvl=%d, hp=%d/%d)",
+                  (unsigned int)off, count, test_mon.nickname, test_mon.species, test_mon.level, test_mon.current_hp, test_mon.max_hp);
         return count;
     }
 
@@ -432,6 +425,11 @@ uint8_t pokemon_read_player_party(
                 } else break;
             }
             out_snapshot->count = valid_count;
+            static int s_static_log_counter = 0;
+            if ((++s_static_log_counter % 30) == 1) {
+                LOG_PARTY("Static party offset 0x%X matched: count=%d, lead='%s', species=%d, lvl=%d",
+                          config->player_party_offset, valid_count, first_mon.nickname, first_mon.species, first_mon.level);
+            }
             return valid_count;
         }
     }

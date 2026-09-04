@@ -14,7 +14,7 @@
 static jclass g_parsed_pokemon_cls = NULL;
 static jmethodID g_parsed_pokemon_ctor = NULL;
 
-#define PARSED_POKEMON_SIG "(ZZJIILjava/lang/String;Ljava/lang/String;IIIILjava/lang/String;ZIZIJIIIIIIIIIIII[I[IIIIIIIJ)V"
+#define PARSED_POKEMON_SIG "(ZZJIILjava/lang/String;Ljava/lang/String;IIIILjava/lang/String;ZIZIJIIIIIIIIIIII[I[IIIIIIIIJ)V"
 
 static void init_class_cache(JNIEnv* env) {
     if (g_parsed_pokemon_cls != NULL && g_parsed_pokemon_ctor != NULL) return;
@@ -126,6 +126,14 @@ static jobject create_parsed_pokemon_object(JNIEnv* env, const ParsedPokemon* p)
         (jint)p->sp_defense,
         (jlong)p->status_condition
     );
+
+    if (!obj) {
+        LOGE("create_parsed_pokemon_object: NewObject returned NULL! Species: %d", p->species);
+        if ((*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionDescribe(env);
+            (*env)->ExceptionClear(env);
+        }
+    }
 
     (*env)->DeleteLocalRef(env, j_nickname);
     (*env)->DeleteLocalRef(env, j_otname);
@@ -388,6 +396,15 @@ Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobj
     PartySnapshot snapshot;
     uint8_t count = pokemon_read_player_party(ewram, ewram_sz, cfg, &snapshot);
 
+    static int s_party_log_counter = 0;
+    if ((++s_party_log_counter % 30) == 1) {
+        LOGI("nativeReadPartyFromCore: game_id=%d, ewram_sz=%zu, count=%d, lead_species=%d, lead_nickname='%s', lead_level=%d",
+             game_id, ewram_sz, count,
+             count > 0 ? snapshot.members[0].species : 0,
+             count > 0 ? snapshot.members[0].nickname : "None",
+             count > 0 ? snapshot.members[0].level : 0);
+    }
+
     jobjectArray array = (*env)->NewObjectArray(env, count, g_parsed_pokemon_cls, NULL);
     if (!array) return NULL;
     for (uint8_t i = 0; i < count; i++) {
@@ -395,6 +412,9 @@ Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobj
         if (p_obj) {
             (*env)->SetObjectArrayElement(env, array, i, p_obj);
             (*env)->DeleteLocalRef(env, p_obj);
+        } else {
+            LOGE("nativeReadPartyFromCore: create_parsed_pokemon_object returned NULL for slot %d (species=%d)!",
+                 i, snapshot.members[i].species);
         }
     }
 
