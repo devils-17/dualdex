@@ -111,6 +111,30 @@ uint8_t pokemon_scan_ewram_for_party(
     PartySnapshot* out_snapshot
 );
 
+typedef struct {
+    int16_t map_group;
+    int16_t map_num;
+    int8_t  warp_id;
+    int16_t x;
+    int16_t y;
+    int16_t local_x;
+    int16_t local_y;
+    int16_t escape_map_group;
+    int16_t escape_map_num;
+    bool    is_indoors;
+    bool    is_valid;
+} PlayerLocationRaw;
+
+/**
+ * Read the active player position and map coordinates from SaveBlock1 in EWRAM.
+ */
+bool pokemon_read_player_location(
+    const uint8_t* ewram,
+    size_t ewram_size,
+    const GameMemoryConfig* config,
+    PlayerLocationRaw* out_location
+);
+
 #ifdef __cplusplus
 }
 #endif

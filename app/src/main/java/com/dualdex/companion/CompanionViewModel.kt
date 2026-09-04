@@ -3,6 +3,9 @@ package com.dualdex.companion
 import android.net.Uri
 import com.dualdex.emulator.LibretroHost
 import com.dualdex.pokemon.ParsedPokemon
+import com.dualdex.pokemon.PlayerLocation
+import com.dualdex.pokemon.RegionMapDatabase
+import com.dualdex.pokemon.RegionMapSection
 import com.dualdex.romhack.RomHackProfile
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +22,7 @@ data class RomItem(
 enum class CompanionTab(val title: String, val iconEmoji: String) {
     HOME("Home", "🏠"),
     PARTY("Party", "👥"),
+    MAP("Map", "🗺️"),
     CALC("Calc", "⚔️"),
     TYPES("Types", "🛡️"),
     DOCS("Docs", "📖"),
@@ -57,6 +61,12 @@ class CompanionViewModel(
 
     private val _activeProfile = MutableStateFlow(RomHackProfile.DEFAULT_FIRERED)
     val activeProfile: StateFlow<RomHackProfile> = _activeProfile.asStateFlow()
+
+    private val _playerLocation = MutableStateFlow<PlayerLocation?>(null)
+    val playerLocation: StateFlow<PlayerLocation?> = _playerLocation.asStateFlow()
+
+    private val _resolvedLocation = MutableStateFlow<RegionMapSection>(RegionMapDatabase.JOHTO_DEFAULT)
+    val resolvedLocation: StateFlow<RegionMapSection> = _resolvedLocation.asStateFlow()
 
     private var pollingJob: Job? = null
 
@@ -110,6 +120,13 @@ class CompanionViewModel(
                             _enemyParty.value = enemyList
                             _isInBattle.value = enemyList.isNotEmpty()
                         }
+                    }
+
+                    val loc = LibretroHost.nativeReadPlayerLocation(gameId)
+                    if (loc != null && loc.isValid && loc != _playerLocation.value) {
+                        _playerLocation.value = loc
+                        val isHns = _activeProfile.value.id == "heart_and_soul" || _activeRomTitle.value.contains("HEART", ignoreCase = true)
+                        _resolvedLocation.value = RegionMapDatabase.resolveLocation(gameId, isHns, loc)
                     }
                 } catch (e: Throwable) {
                     android.util.Log.e("DualDex_Companion", "Error in memory poller: ${e.message}", e)

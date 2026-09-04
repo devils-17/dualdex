@@ -24,4 +24,9 @@ object PokemonBridge {
      * Read the active enemy/opponent party from EWRAM during battle.
      */
     external fun readEnemyParty(ewramBytes: ByteArray, gameId: Int): Array<ParsedPokemon>
+
+    /**
+     * Read the player's live map coordinates and location from EWRAM.
+     */
+    external fun readPlayerLocation(ewramBytes: ByteArray, gameId: Int): PlayerLocation?
 }

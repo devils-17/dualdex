@@ -1,6 +1,7 @@
 package com.dualdex.emulator
 
 import com.dualdex.pokemon.ParsedPokemon
+import com.dualdex.pokemon.PlayerLocation
 import java.nio.ByteBuffer
 
 object LibretroHost {
@@ -19,6 +20,7 @@ object LibretroHost {
     external fun nativeGetOutputAudioSampleRate(): Int
     external fun nativeReadPartyFromCore(gameId: Int): Array<ParsedPokemon>?
     external fun nativeReadEnemyPartyFromCore(gameId: Int): Array<ParsedPokemon>?
+    external fun nativeReadPlayerLocation(gameId: Int): PlayerLocation?
     external fun nativeSaveState(statePath: String): Boolean
     external fun nativeLoadState(statePath: String): Boolean
     external fun nativeLoadSaveRam(savePath: String): Boolean

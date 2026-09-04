@@ -634,3 +634,68 @@ uint8_t pokemon_read_enemy_party(
     return 0;
 }
 
+bool pokemon_read_player_location(
+    const uint8_t* ewram,
+    size_t ewram_size,
+    const GameMemoryConfig* config,
+    PlayerLocationRaw* out_location
+) {
+    if (!ewram || ewram_size == 0 || !out_location) return false;
+    memset(out_location, 0, sizeof(PlayerLocationRaw));
+
+    uint32_t party_off = s_cached_player_party_offset;
+    if (party_off == 0) {
+        if (config && config->player_party_offset > 0 && config->player_party_offset + 100 <= ewram_size) {
+            party_off = (uint32_t)config->player_party_offset;
+        }
+    }
+
+    if (party_off == 0) return false;
+
+    // Determine SaveBlock1 offset relative to player party
+    // In Emerald / Ruby / Sapphire / Heart & Soul: SaveBlock1.playerParty is at offset 0x238
+    // In FireRed / LeafGreen: SaveBlock1.playerParty is at offset 0x38
+    bool is_firered = (config && config->game_id == GAME_FIRERED);
+    size_t sb1_party_offset = is_firered ? 0x38 : 0x238;
+
+    if (party_off < sb1_party_offset || party_off >= ewram_size) {
+        return false;
+    }
+
+    const uint8_t* sb1 = ewram + (party_off - sb1_party_offset);
+
+    // Read Coords16 pos (offset 0x00)
+    int16_t pos_x = (int16_t)(sb1[0] | (sb1[1] << 8));
+    int16_t pos_y = (int16_t)(sb1[2] | (sb1[3] << 8));
+
+    // Read WarpData location (offset 0x04)
+    int16_t map_group = (int16_t)sb1[4];
+    int16_t map_num = (int16_t)sb1[5];
+    int8_t warp_id = (int8_t)sb1[6];
+    int16_t warp_x = (int16_t)(sb1[8] | (sb1[9] << 8));
+    int16_t warp_y = (int16_t)(sb1[10] | (sb1[11] << 8));
+
+    // Read WarpData escapeWarp (offset 0x24)
+    int16_t esc_group = (int16_t)sb1[0x24];
+    int16_t esc_num = (int16_t)sb1[0x25];
+
+    // Basic validity sanity check: valid map groups are typically 0..35 and map nums 0..130
+    if (map_group < 0 || map_group > 35 || map_num < 0 || map_num > 130) {
+        return false;
+    }
+
+    out_location->map_group = map_group;
+    out_location->map_num = map_num;
+    out_location->warp_id = warp_id;
+    out_location->x = warp_x;
+    out_location->y = warp_y;
+    out_location->local_x = pos_x;
+    out_location->local_y = pos_y;
+    out_location->escape_map_group = esc_group;
+    out_location->escape_map_num = esc_num;
+    out_location->is_indoors = (map_group != 0);
+    out_location->is_valid = true;
+
+    return true;
+}
+

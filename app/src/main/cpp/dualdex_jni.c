@@ -14,20 +14,22 @@
 static jclass g_parsed_pokemon_cls = NULL;
 static jmethodID g_parsed_pokemon_ctor = NULL;
 
+static jclass g_player_location_cls = NULL;
+static jmethodID g_player_location_ctor = NULL;
+
 #define PARSED_POKEMON_SIG "(ZZJIILjava/lang/String;Ljava/lang/String;IIIILjava/lang/String;ZIZIJIIIIIIIIIIII[I[IIIIIIIIJ)V"
+#define PLAYER_LOCATION_SIG "(IIIIIIIIIZZ)V"
 
 static void init_class_cache(JNIEnv* env) {
-    if (g_parsed_pokemon_cls != NULL && g_parsed_pokemon_ctor != NULL) return;
-
     if (g_parsed_pokemon_cls == NULL) {
         jclass local_cls = (*env)->FindClass(env, "com/dualdex/pokemon/ParsedPokemon");
         if (!local_cls) {
             LOGE("Failed to find com.dualdex.pokemon.ParsedPokemon");
             (*env)->ExceptionClear(env);
-            return;
+        } else {
+            g_parsed_pokemon_cls = (jclass)(*env)->NewGlobalRef(env, local_cls);
+            (*env)->DeleteLocalRef(env, local_cls);
         }
-        g_parsed_pokemon_cls = (jclass)(*env)->NewGlobalRef(env, local_cls);
-        (*env)->DeleteLocalRef(env, local_cls);
     }
 
     if (g_parsed_pokemon_ctor == NULL && g_parsed_pokemon_cls != NULL) {
@@ -43,6 +45,33 @@ static void init_class_cache(JNIEnv* env) {
             (*env)->ExceptionClear(env);
         } else {
             LOGI("ParsedPokemon constructor resolved successfully");
+        }
+    }
+
+    if (g_player_location_cls == NULL) {
+        jclass local_cls = (*env)->FindClass(env, "com/dualdex/pokemon/PlayerLocation");
+        if (!local_cls) {
+            LOGE("Failed to find com.dualdex.pokemon.PlayerLocation");
+            (*env)->ExceptionClear(env);
+        } else {
+            g_player_location_cls = (jclass)(*env)->NewGlobalRef(env, local_cls);
+            (*env)->DeleteLocalRef(env, local_cls);
+        }
+    }
+
+    if (g_player_location_ctor == NULL && g_player_location_cls != NULL) {
+        g_player_location_ctor = (*env)->GetMethodID(
+            env,
+            g_player_location_cls,
+            "<init>",
+            PLAYER_LOCATION_SIG
+        );
+
+        if (!g_player_location_ctor) {
+            LOGE("Failed to find PlayerLocation constructor with signature: %s", PLAYER_LOCATION_SIG);
+            (*env)->ExceptionClear(env);
+        } else {
+            LOGI("PlayerLocation constructor resolved successfully");
         }
     }
 }
@@ -255,6 +284,46 @@ Java_com_dualdex_pokemon_PokemonBridge_readEnemyParty(
     return array;
 }
 
+JNIEXPORT jobject JNICALL
+Java_com_dualdex_pokemon_PokemonBridge_readPlayerLocation(
+    JNIEnv* env,
+    jobject thiz,
+    jbyteArray ewram_bytes,
+    jint game_id
+) {
+    (void)thiz;
+    init_class_cache(env);
+    if (!g_player_location_cls || !g_player_location_ctor) return NULL;
+    if (!ewram_bytes) return NULL;
+
+    jsize len = (*env)->GetArrayLength(env, ewram_bytes);
+    jbyte* bytes = (*env)->GetByteArrayElements(env, ewram_bytes, NULL);
+
+    const GameMemoryConfig* cfg = pokemon_get_game_config((GbaGameId)game_id);
+    PlayerLocationRaw loc;
+    bool ok = pokemon_read_player_location((const uint8_t*)bytes, (size_t)len, cfg, &loc);
+    (*env)->ReleaseByteArrayElements(env, ewram_bytes, bytes, JNI_ABORT);
+
+    if (!ok || !loc.is_valid) return NULL;
+
+    return (*env)->NewObject(
+        env,
+        g_player_location_cls,
+        g_player_location_ctor,
+        (jint)loc.map_group,
+        (jint)loc.map_num,
+        (jint)loc.warp_id,
+        (jint)loc.x,
+        (jint)loc.y,
+        (jint)loc.local_x,
+        (jint)loc.local_y,
+        (jint)loc.escape_map_group,
+        (jint)loc.escape_map_num,
+        (jboolean)loc.is_indoors,
+        (jboolean)loc.is_valid
+    );
+}
+
 // -------------------------------------------------------------
 // Libretro Emulator Host JNI
 // -------------------------------------------------------------
@@ -451,6 +520,46 @@ Java_com_dualdex_emulator_LibretroHost_nativeReadEnemyPartyFromCore(JNIEnv* env,
     }
 
     return array;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeReadPlayerLocation(JNIEnv* env, jobject thiz, jint game_id) {
+    (void)thiz;
+    init_class_cache(env);
+    if (!g_player_location_cls || !g_player_location_ctor) {
+        LOGE("nativeReadPlayerLocation: g_player_location_cls is NULL!");
+        return NULL;
+    }
+
+    size_t ewram_sz = 0;
+    uint8_t* ewram = libretro_host_get_ewram(&ewram_sz);
+    if (!ewram || ewram_sz == 0) {
+        return NULL;
+    }
+
+    const GameMemoryConfig* cfg = pokemon_get_game_config((GbaGameId)game_id);
+    PlayerLocationRaw loc;
+    bool ok = pokemon_read_player_location(ewram, ewram_sz, cfg, &loc);
+    if (!ok || !loc.is_valid) {
+        return NULL;
+    }
+
+    return (*env)->NewObject(
+        env,
+        g_player_location_cls,
+        g_player_location_ctor,
+        (jint)loc.map_group,
+        (jint)loc.map_num,
+        (jint)loc.warp_id,
+        (jint)loc.x,
+        (jint)loc.y,
+        (jint)loc.local_x,
+        (jint)loc.local_y,
+        (jint)loc.escape_map_group,
+        (jint)loc.escape_map_num,
+        (jboolean)loc.is_indoors,
+        (jboolean)loc.is_valid
+    );
 }
 
 JNIEXPORT jboolean JNICALL
