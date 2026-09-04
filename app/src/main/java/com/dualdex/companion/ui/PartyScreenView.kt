@@ -4,8 +4,11 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.*
 import com.dualdex.companion.CompanionViewModel
 import com.dualdex.pokemon.*
@@ -15,8 +18,16 @@ class PartyScreenView(
     private val viewModel: CompanionViewModel
 ) : LinearLayout(context) {
 
+    private class ChipHolder(
+        val chip: LinearLayout,
+        val nameView: TextView,
+        val hpView: TextView
+    )
+
     private val memberSelectorLayout: LinearLayout
     private val detailContainer: LinearLayout
+    private val chipHolders = ArrayList<ChipHolder>()
+    private var lastSelectedIdx = -1
 
     private val density = context.resources.displayMetrics.density
     private fun dp(v: Int): Int = (v * density).toInt()
@@ -59,9 +70,14 @@ class PartyScreenView(
         val selectedIdx = viewModel.selectedMemberIndex.value
         val gameId = viewModel.activeGameId.value
 
-        // 1. Build member selector chips
-        memberSelectorLayout.removeAllViews()
+        updateSelectorChips(party, selectedIdx)
+        updateDetailCard(party, selectedIdx, gameId)
+    }
+
+    private fun updateSelectorChips(party: List<ParsedPokemon>, selectedIdx: Int) {
         if (party.isEmpty()) {
+            chipHolders.clear()
+            memberSelectorLayout.removeAllViews()
             val emptyChip = TextView(context).apply {
                 text = "No party data (Waiting for ROM)"
                 setTextColor(0xFF888888.toInt())
@@ -69,58 +85,138 @@ class PartyScreenView(
                 setPadding(dp(20), dp(12), dp(20), dp(12))
             }
             memberSelectorLayout.addView(emptyChip)
-        } else {
+            return
+        }
+
+        // Check if we need to rebuild or if we can update chips in-place
+        if (chipHolders.size != party.size) {
+            chipHolders.clear()
+            memberSelectorLayout.removeAllViews()
+
             party.forEachIndexed { index, mon ->
                 val isSelected = (index == selectedIdx)
                 val chip = LinearLayout(context).apply {
                     orientation = VERTICAL
                     isClickable = true
                     isFocusable = true
-                    minimumWidth = dp(96)
-                    minimumHeight = dp(56)
+                    minimumWidth = dp(104)
+                    minimumHeight = dp(60)
                     setPadding(dp(16), dp(10), dp(16), dp(10))
                     gravity = Gravity.CENTER
-                    background = GradientDrawable().apply {
-                        cornerRadius = dp(14).toFloat()
-                        setColor(if (isSelected) 0xFF2E3A59.toInt() else 0xFF1E1E24.toInt())
-                        if (isSelected) {
-                            setStroke(dp(3), 0xFF4A9EFF.toInt())
-                        } else {
-                            setStroke(dp(1), 0xFF363644.toInt())
+                    background = createChipDrawable(isSelected)
+                }
+
+                val displayName = if (mon.nickname.isNotBlank()) mon.nickname else "Mon #${mon.species}"
+                val nameView = TextView(context).apply {
+                    isClickable = false
+                    isFocusable = false
+                    text = "$displayName (Lv.${mon.level})"
+                    setTextColor(if (isSelected) 0xFFFFFFFF.toInt() else 0xFFAAAAAA.toInt())
+                    textSize = 13.5f
+                    typeface = Typeface.DEFAULT_BOLD
+                }
+                val hpView = TextView(context).apply {
+                    isClickable = false
+                    isFocusable = false
+                    text = "${mon.currentHp}/${mon.maxHp} HP"
+                    setTextColor(getHpColor(mon.currentHp, mon.maxHp))
+                    textSize = 12f
+                }
+                chip.addView(nameView)
+                chip.addView(hpView)
+
+                var downX = 0f
+                var downY = 0f
+                val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+
+                chip.setOnTouchListener { v, event ->
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            v.parent?.requestDisallowInterceptTouchEvent(true)
+                            downX = event.rawX
+                            downY = event.rawY
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dx = Math.abs(event.rawX - downX)
+                            val dy = Math.abs(event.rawY - downY)
+                            if (dx > touchSlop * 1.5f || dy > touchSlop * 1.5f) {
+                                v.parent?.requestDisallowInterceptTouchEvent(false)
+                            }
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            v.parent?.requestDisallowInterceptTouchEvent(false)
                         }
                     }
-                    val nameView = TextView(context).apply {
-                        isClickable = false
-                        isFocusable = false
-                        val displayName = if (mon.nickname.isNotBlank()) mon.nickname else "Mon #${mon.species}"
-                        text = "$displayName (Lv.${mon.level})"
-                        setTextColor(if (isSelected) 0xFFFFFFFF.toInt() else 0xFFAAAAAA.toInt())
-                        textSize = 13.5f
-                        typeface = Typeface.DEFAULT_BOLD
-                    }
-                    val hpView = TextView(context).apply {
-                        isClickable = false
-                        isFocusable = false
-                        text = "${mon.currentHp}/${mon.maxHp} HP"
-                        setTextColor(getHpColor(mon.currentHp, mon.maxHp))
-                        textSize = 12f
-                    }
-                    addView(nameView)
-                    addView(hpView)
-
-                    setOnClickListener {
-                        viewModel.selectMember(index)
-                        refreshUI()
-                    }
+                    false // Allow standard click & ripple processing
                 }
+
+                chip.setOnClickListener {
+                    onMemberSelected(index)
+                }
+
                 val lp = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
                     setMargins(0, 0, dp(10), 0)
                 }
                 memberSelectorLayout.addView(chip, lp)
+                chipHolders.add(ChipHolder(chip, nameView, hpView))
+            }
+        } else {
+            // Update in-place to avoid interrupting ongoing touch interactions!
+            for (i in party.indices) {
+                val holder = chipHolders[i]
+                val mon = party[i]
+                val isSelected = (i == selectedIdx)
+
+                holder.chip.background = createChipDrawable(isSelected)
+                val displayName = if (mon.nickname.isNotBlank()) mon.nickname else "Mon #${mon.species}"
+                holder.nameView.text = "$displayName (Lv.${mon.level})"
+                holder.nameView.setTextColor(if (isSelected) 0xFFFFFFFF.toInt() else 0xFFAAAAAA.toInt())
+                holder.hpView.text = "${mon.currentHp}/${mon.maxHp} HP"
+                holder.hpView.setTextColor(getHpColor(mon.currentHp, mon.maxHp))
+            }
+        }
+    }
+
+    private fun onMemberSelected(newIdx: Int) {
+        if (newIdx == lastSelectedIdx && detailContainer.childCount > 0) return
+        lastSelectedIdx = newIdx
+        viewModel.selectMember(newIdx)
+
+        // Instantly update chip selection visuals without recreating views
+        for (i in chipHolders.indices) {
+            val isSel = (i == newIdx)
+            chipHolders[i].chip.background = createChipDrawable(isSel)
+            chipHolders[i].nameView.setTextColor(if (isSel) 0xFFFFFFFF.toInt() else 0xFFAAAAAA.toInt())
+        }
+
+        // Update detail section below
+        updateDetailCard(viewModel.playerParty.value, newIdx, viewModel.activeGameId.value)
+    }
+
+    private fun createChipDrawable(isSelected: Boolean): StateListDrawable {
+        val normal = GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setColor(if (isSelected) 0xFF2E3A59.toInt() else 0xFF1E1E24.toInt())
+            if (isSelected) {
+                setStroke(dp(3), 0xFF4A9EFF.toInt())
+            } else {
+                setStroke(dp(1), 0xFF363644.toInt())
             }
         }
 
-        // 2. Build detail card
+        val pressed = GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setColor(if (isSelected) 0xFF3E4F78.toInt() else 0xFF2C2C36.toInt())
+            setStroke(dp(3), 0xFF6BB5FF.toInt())
+        }
+
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), pressed)
+            addState(intArrayOf(), normal)
+        }
+    }
+
+    private fun updateDetailCard(party: List<ParsedPokemon>, selectedIdx: Int, gameId: Int) {
         detailContainer.removeAllViews()
         if (party.isEmpty()) {
             val emptyMsg = TextView(context).apply {
@@ -128,7 +224,7 @@ class PartyScreenView(
                 setTextColor(0xFFAAAAAA.toInt())
                 textSize = 16f
                 gravity = Gravity.CENTER
-                setPadding(32, 64, 32, 32)
+                setPadding(dp(16), dp(32), dp(16), dp(16))
             }
             detailContainer.addView(emptyMsg)
             return
@@ -167,7 +263,7 @@ class PartyScreenView(
             // Types badge row
             val typeRow = LinearLayout(context).apply {
                 orientation = HORIZONTAL
-                setPadding(0, 12, 0, 12)
+                setPadding(0, dp(6), 0, dp(6))
             }
             typeRow.addView(createTypeBadge(speciesInfo.type1))
             speciesInfo.type2?.let { typeRow.addView(createTypeBadge(it)) }
@@ -177,7 +273,7 @@ class PartyScreenView(
             val hpRow = LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 8, 0, 8)
+                setPadding(0, dp(4), 0, dp(4))
             }
             val hpLabel = TextView(context).apply {
                 text = "HP: ${mon.currentHp} / ${mon.maxHp}"
@@ -193,7 +289,7 @@ class PartyScreenView(
                 text = "Nature: ${natureInfo.formattedDescription}\nItem: ${if (mon.heldItem > 0) "Item #${mon.heldItem}" else "None"}"
                 setTextColor(0xFFCCCCCC.toInt())
                 textSize = 14f
-                setPadding(0, 4, 0, 4)
+                setPadding(0, dp(2), 0, dp(2))
             }
             addView(metaText)
         }
@@ -206,7 +302,7 @@ class PartyScreenView(
                 setTextColor(0xFF4A9EFF.toInt())
                 textSize = 16f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, 0, 12)
+                setPadding(0, 0, 0, dp(6))
             }
             addView(statTitle)
 
@@ -242,7 +338,7 @@ class PartyScreenView(
                 setTextColor(0xFF4A9EFF.toInt())
                 textSize = 16f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, 0, 12)
+                setPadding(0, 0, 0, dp(6))
             }
             addView(moveTitle)
 
@@ -255,7 +351,7 @@ class PartyScreenView(
                     val moveRow = LinearLayout(context).apply {
                         orientation = HORIZONTAL
                         gravity = Gravity.CENTER_VERTICAL
-                        setPadding(0, 6, 0, 6)
+                        setPadding(0, dp(3), 0, dp(3))
                     }
                     val moveBadge = createTypeBadge(moveInfo.type)
                     val moveDetails = TextView(context).apply {
@@ -290,7 +386,7 @@ class PartyScreenView(
                 setTextColor(0xFF4A9EFF.toInt())
                 textSize = 16f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, 0, 8)
+                setPadding(0, 0, 0, dp(4))
             }
             addView(defTitle)
 
@@ -299,7 +395,7 @@ class PartyScreenView(
             if (weakTypes.isNotEmpty()) {
                 val weakRow = LinearLayout(context).apply {
                     orientation = HORIZONTAL
-                    setPadding(0, 6, 0, 6)
+                    setPadding(0, dp(3), 0, dp(3))
                 }
                 val weakLabel = TextView(context).apply {
                     text = "⚠️ Weak (2x-4x): "
@@ -317,7 +413,7 @@ class PartyScreenView(
             if (resTypes.isNotEmpty()) {
                 val resRow = LinearLayout(context).apply {
                     orientation = HORIZONTAL
-                    setPadding(0, 6, 0, 6)
+                    setPadding(0, dp(3), 0, dp(3))
                 }
                 val resLabel = TextView(context).apply {
                     text = "🛡️ Resist (0.5x): "
@@ -334,7 +430,7 @@ class PartyScreenView(
             if (defenseProfile.immunities.isNotEmpty()) {
                 val immRow = LinearLayout(context).apply {
                     orientation = HORIZONTAL
-                    setPadding(0, 6, 0, 6)
+                    setPadding(0, dp(3), 0, dp(3))
                 }
                 val immLabel = TextView(context).apply {
                     text = "🚫 Immune (0x): "
@@ -353,13 +449,13 @@ class PartyScreenView(
     private fun createCardLayout(): LinearLayout {
         return LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(24, 20, 24, 20)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
             background = GradientDrawable().apply {
-                cornerRadius = 24f
+                cornerRadius = dp(16).toFloat()
                 setColor(0xFF1E1E26.toInt())
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 20)
+                setMargins(0, 0, 0, dp(14))
             }
         }
     }
@@ -370,13 +466,13 @@ class PartyScreenView(
             setTextColor(Color.WHITE)
             textSize = textSizeSp
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(18, 6, 18, 6)
+            setPadding(dp(10), dp(4), dp(10), dp(4))
             background = GradientDrawable().apply {
-                cornerRadius = 16f
+                cornerRadius = dp(10).toFloat()
                 setColor(type.colorHex.toInt())
             }
             layoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 10, 0)
+                setMargins(0, 0, dp(6), 0)
             }
         }
     }

@@ -87,7 +87,7 @@ class CompanionViewModel(
         _activeRomTitle.value = profile.name
     }
 
-    fun startPolling(intervalMs: Long = 100L) {
+    fun startPolling(intervalMs: Long = 200L) {
         if (pollingJob?.isActive == true) return
 
         pollingJob = scope.launch(Dispatchers.IO) {
@@ -97,7 +97,7 @@ class CompanionViewModel(
                     val playerPartyRaw = LibretroHost.nativeReadPartyFromCore(gameId)
                     if (playerPartyRaw != null) {
                         val playerList = playerPartyRaw.filterNotNull().filter { !it.isEmpty && it.isValid }
-                        if (playerList.isNotEmpty()) {
+                        if (playerList.isNotEmpty() && playerList != _playerParty.value) {
                             _playerParty.value = playerList
                         }
                     }
@@ -105,8 +105,10 @@ class CompanionViewModel(
                     val enemyPartyRaw = LibretroHost.nativeReadEnemyPartyFromCore(gameId)
                     if (enemyPartyRaw != null) {
                         val enemyList = enemyPartyRaw.filterNotNull().filter { !it.isEmpty && it.isValid }
-                        _enemyParty.value = enemyList
-                        _isInBattle.value = enemyList.isNotEmpty()
+                        if (enemyList != _enemyParty.value) {
+                            _enemyParty.value = enemyList
+                            _isInBattle.value = enemyList.isNotEmpty()
+                        }
                     }
                 } catch (e: Throwable) {
                     android.util.Log.e("DualDex_Companion", "Error in memory poller: ${e.message}", e)

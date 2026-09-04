@@ -50,6 +50,98 @@ data class ParsedPokemon(
 ) {
     val totalEvs: Int get() = hpEv + attackEv + defenseEv + speedEv + spAttackEv + spDefenseEv
     val totalIvs: Int get() = hpIv + attackIv + defenseIv + speedIv + spAttackIv + spDefenseIv
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ParsedPokemon
+
+        if (isValid != other.isValid) return false
+        if (isEmpty != other.isEmpty) return false
+        if (pid != other.pid) return false
+        if (tid != other.tid) return false
+        if (sid != other.sid) return false
+        if (nickname != other.nickname) return false
+        if (otName != other.otName) return false
+        if (species != other.species) return false
+        if (heldItem != other.heldItem) return false
+        if (level != other.level) return false
+        if (nature != other.nature) return false
+        if (natureName != other.natureName) return false
+        if (isShiny != other.isShiny) return false
+        if (abilitySlot != other.abilitySlot) return false
+        if (isEgg != other.isEgg) return false
+        if (friendship != other.friendship) return false
+        if (experience != other.experience) return false
+        if (hpIv != other.hpIv) return false
+        if (attackIv != other.attackIv) return false
+        if (defenseIv != other.defenseIv) return false
+        if (speedIv != other.speedIv) return false
+        if (spAttackIv != other.spAttackIv) return false
+        if (spDefenseIv != other.spDefenseIv) return false
+        if (hpEv != other.hpEv) return false
+        if (attackEv != other.attackEv) return false
+        if (defenseEv != other.defenseEv) return false
+        if (speedEv != other.speedEv) return false
+        if (spAttackEv != other.spAttackEv) return false
+        if (spDefenseEv != other.spDefenseEv) return false
+        if (!moves.contentEquals(other.moves)) return false
+        if (!pp.contentEquals(other.pp)) return false
+        if (currentHp != other.currentHp) return false
+        if (maxHp != other.maxHp) return false
+        if (attack != other.attack) return false
+        if (defense != other.defense) return false
+        if (speed != other.speed) return false
+        if (spAttack != other.spAttack) return false
+        if (spDefense != other.spDefense) return false
+        if (statusCondition != other.statusCondition) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = isValid.hashCode()
+        result = 31 * result + isEmpty.hashCode()
+        result = 31 * result + pid.hashCode()
+        result = 31 * result + tid
+        result = 31 * result + sid
+        result = 31 * result + nickname.hashCode()
+        result = 31 * result + otName.hashCode()
+        result = 31 * result + species
+        result = 31 * result + heldItem
+        result = 31 * result + level
+        result = 31 * result + nature
+        result = 31 * result + natureName.hashCode()
+        result = 31 * result + isShiny.hashCode()
+        result = 31 * result + abilitySlot
+        result = 31 * result + isEgg.hashCode()
+        result = 31 * result + friendship
+        result = 31 * result + experience.hashCode()
+        result = 31 * result + hpIv
+        result = 31 * result + attackIv
+        result = 31 * result + defenseIv
+        result = 31 * result + speedIv
+        result = 31 * result + spAttackIv
+        result = 31 * result + spDefenseIv
+        result = 31 * result + hpEv
+        result = 31 * result + attackEv
+        result = 31 * result + defenseEv
+        result = 31 * result + speedEv
+        result = 31 * result + spAttackEv
+        result = 31 * result + spDefenseEv
+        result = 31 * result + moves.contentHashCode()
+        result = 31 * result + pp.contentHashCode()
+        result = 31 * result + currentHp
+        result = 31 * result + maxHp
+        result = 31 * result + attack
+        result = 31 * result + defense
+        result = 31 * result + speed
+        result = 31 * result + spAttack
+        result = 31 * result + spDefense
+        result = 31 * result + statusCondition.hashCode()
+        return result
+    }
 }
 
 enum class GbaGame(val id: Int, val title: String) {
