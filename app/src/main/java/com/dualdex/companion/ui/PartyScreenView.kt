@@ -18,6 +18,9 @@ class PartyScreenView(
     private val memberSelectorLayout: LinearLayout
     private val detailContainer: LinearLayout
 
+    private val density = context.resources.displayMetrics.density
+    private fun dp(v: Int): Int = (v * density).toInt()
+
     init {
         orientation = VERTICAL
         setBackgroundColor(0xFF121216.toInt()) // Deep modern dark theme
@@ -25,10 +28,13 @@ class PartyScreenView(
         // Top horizontal party member selector
         val horizontalScroll = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
-            setPadding(16, 16, 16, 8)
+            clipToPadding = false
+            clipChildren = false
+            setPadding(dp(12), dp(10), dp(12), dp(8))
         }
         memberSelectorLayout = LinearLayout(context).apply {
             orientation = HORIZONTAL
+            clipChildren = false
         }
         horizontalScroll.addView(memberSelectorLayout)
         addView(horizontalScroll)
@@ -40,7 +46,7 @@ class PartyScreenView(
         }
         detailContainer = LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(24, 8, 24, 32)
+            setPadding(dp(16), dp(6), dp(16), dp(24))
         }
         verticalScroll.addView(detailContainer)
         addView(verticalScroll)
@@ -60,7 +66,7 @@ class PartyScreenView(
                 text = "No party data (Waiting for ROM)"
                 setTextColor(0xFF888888.toInt())
                 textSize = 14f
-                setPadding(24, 12, 24, 12)
+                setPadding(dp(20), dp(12), dp(20), dp(12))
             }
             memberSelectorLayout.addView(emptyChip)
         } else {
@@ -68,24 +74,36 @@ class PartyScreenView(
                 val isSelected = (index == selectedIdx)
                 val chip = LinearLayout(context).apply {
                     orientation = VERTICAL
-                    setPadding(24, 12, 24, 12)
+                    isClickable = true
+                    isFocusable = true
+                    minimumWidth = dp(96)
+                    minimumHeight = dp(56)
+                    setPadding(dp(16), dp(10), dp(16), dp(10))
                     gravity = Gravity.CENTER
                     background = GradientDrawable().apply {
-                        cornerRadius = 20f
+                        cornerRadius = dp(14).toFloat()
                         setColor(if (isSelected) 0xFF2E3A59.toInt() else 0xFF1E1E24.toInt())
-                        if (isSelected) setStroke(3, 0xFF4A9EFF.toInt())
+                        if (isSelected) {
+                            setStroke(dp(3), 0xFF4A9EFF.toInt())
+                        } else {
+                            setStroke(dp(1), 0xFF363644.toInt())
+                        }
                     }
                     val nameView = TextView(context).apply {
+                        isClickable = false
+                        isFocusable = false
                         val displayName = if (mon.nickname.isNotBlank()) mon.nickname else "Mon #${mon.species}"
                         text = "$displayName (Lv.${mon.level})"
                         setTextColor(if (isSelected) 0xFFFFFFFF.toInt() else 0xFFAAAAAA.toInt())
-                        textSize = 13f
+                        textSize = 13.5f
                         typeface = Typeface.DEFAULT_BOLD
                     }
                     val hpView = TextView(context).apply {
+                        isClickable = false
+                        isFocusable = false
                         text = "${mon.currentHp}/${mon.maxHp} HP"
                         setTextColor(getHpColor(mon.currentHp, mon.maxHp))
-                        textSize = 11f
+                        textSize = 12f
                     }
                     addView(nameView)
                     addView(hpView)
@@ -96,7 +114,7 @@ class PartyScreenView(
                     }
                 }
                 val lp = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(0, 0, 16, 0)
+                    setMargins(0, 0, dp(10), 0)
                 }
                 memberSelectorLayout.addView(chip, lp)
             }

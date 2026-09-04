@@ -542,101 +542,95 @@ uint8_t pokemon_read_enemy_party(
     if (!ewram || !out_snapshot) return 0;
     memset(out_snapshot, 0, sizeof(PartySnapshot));
 
-    // 1. Try static offset first
-    if (config && config->enemy_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
-        ParsedPokemon first_mon;
-        const uint8_t* mon_ptr = ewram + config->enemy_party_offset;
-        if (pokemon_parse_single(mon_ptr, true, &first_mon) && first_mon.species > 0 && first_mon.species < 2000) {
-            uint8_t valid_count = 0;
-            out_snapshot->members[valid_count++] = first_mon;
-            for (uint8_t i = 1; i < 6; i++) {
-                const uint8_t* p = ewram + config->enemy_party_offset + (i * sizeof(RawGbaPokemon));
-                if (pokemon_parse_single(p, true, &out_snapshot->members[valid_count])) {
-                    if (out_snapshot->members[valid_count].species > 0 && out_snapshot->members[valid_count].species < 2000) {
-                        valid_count++;
-                    } else break;
-                } else break;
-            }
-            out_snapshot->count = valid_count;
-            return valid_count;
+    // Player party must be located to know the player's OTID and relative offset
+    if (s_cached_player_party_offset == 0 || s_cached_player_party_offset + sizeof(RawGbaPokemon) > ewram_size) {
+        return 0;
+    }
+
+    const RawGbaPokemon* player_mon = (const RawGbaPokemon*)(ewram + s_cached_player_party_offset);
+    uint32_t player_otid = player_mon->otid;
+
+    // 1. Verify in-battle indicator from gEnemyPartyCount
+    // If a static count offset is configured and explicitly 0, we are definitely NOT in battle
+    if (config && config->enemy_party_count_offset > 0 && config->enemy_party_count_offset < ewram_size) {
+        uint8_t count_byte = ewram[config->enemy_party_count_offset];
+        if (count_byte == 0 || count_byte > 6) {
+            return 0; // Not in battle
         }
     }
 
-    // 2. Try cached enemy party offset if previously found
-    if (s_cached_enemy_party_offset > 0 && s_cached_enemy_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
-        ParsedPokemon first_mon;
-        const uint8_t* mon_ptr = ewram + s_cached_enemy_party_offset;
-        if (pokemon_parse_single(mon_ptr, true, &first_mon) && first_mon.species > 0 && first_mon.species < 2000) {
-            uint8_t valid_count = 0;
-            out_snapshot->members[valid_count++] = first_mon;
-            for (uint8_t i = 1; i < 6; i++) {
-                const uint8_t* p = ewram + s_cached_enemy_party_offset + (i * sizeof(RawGbaPokemon));
-                if (pokemon_parse_single(p, true, &out_snapshot->members[valid_count])) {
-                    if (out_snapshot->members[valid_count].species > 0 && out_snapshot->members[valid_count].species < 2000) {
-                        valid_count++;
-                    } else break;
-                } else break;
+    // In pokeemerald-expansion, gEnemyPartyCount is within [player_offset - 4 .. player_offset - 1]
+    // adjacent to gPlayerPartyCount. If all preceding bytes other than player_party_count are 0,
+    // then gEnemyPartyCount is 0 (outside battle).
+    if (s_cached_player_party_offset >= 4) {
+        bool has_active_battle_count = false;
+        for (int b = 1; b <= 4; b++) {
+            uint8_t val = ewram[s_cached_player_party_offset - b];
+            // An active battle enemy count is between 1 and 6
+            if (val >= 1 && val <= 6) {
+                has_active_battle_count = true;
             }
-            out_snapshot->count = valid_count;
-            return valid_count;
-        } else {
-            s_cached_enemy_party_offset = 0;
+        }
+        if (!has_active_battle_count) {
+            return 0; // Preceding EWRAM header confirms 0 enemy party count
         }
     }
 
-    // 3. Scan for active enemy party (must have a valid Pokémon whose OTID or PID doesn't match player)
-    if (s_cached_player_party_offset > 0 && s_cached_player_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
-        const RawGbaPokemon* player_mon = (const RawGbaPokemon*)(ewram + s_cached_player_party_offset);
-        uint32_t player_otid = player_mon->otid;
+    // Candidate enemy party locations:
+    // 1. Expansion layout: player_offset + 1200 (gPlayerParty 600B + gPlayerPartyBackup 600B)
+    // 2. Standard layout: player_offset + 600 (gPlayerParty 600B)
+    // 3. Static config layout: config->enemy_party_offset
+    size_t candidate_offsets[3];
+    int num_candidates = 0;
 
-        size_t max_offset = ewram_size - sizeof(RawGbaPokemon);
-        for (size_t off = 0; off <= max_offset; off += 4) {
-            if (off == s_cached_player_party_offset) continue;
-            // Skip player party memory range (6 slots = 600 bytes)
-            if (off >= s_cached_player_party_offset && off < s_cached_player_party_offset + (6 * sizeof(RawGbaPokemon))) {
-                continue;
-            }
-
-            const RawGbaPokemon* raw = (const RawGbaPokemon*)(ewram + off);
-            if (raw->pid == 0 || raw->otid == player_otid) continue;
-            if (raw->max_hp == 0 || raw->max_hp > 2000) continue;
-            if (raw->current_hp > raw->max_hp) continue;
-            if (raw->level == 0 || raw->level > 100) continue;
-            if (raw->attack == 0 || raw->defense == 0) continue;
-
-            ParsedPokemon test_mon;
-            if (!pokemon_parse_single((const uint8_t*)raw, true, &test_mon)) continue;
-            if (test_mon.species == 0 || test_mon.species >= 2000) continue;
-
-            // Check if previous 100 bytes is also part of enemy party
-            if (off >= sizeof(RawGbaPokemon)) {
-                ParsedPokemon prev_mon;
-                if (pokemon_parse_single(ewram + off - sizeof(RawGbaPokemon), true, &prev_mon)) {
-                    if (prev_mon.species > 0 && prev_mon.species < 2000) {
-                        continue;
-                    }
-                }
-            }
-
-            // Found enemy party start!
-            uint8_t count = 0;
-            out_snapshot->members[count++] = test_mon;
-            for (uint8_t slot = 1; slot < 6; slot++) {
-                size_t next_off = off + (slot * sizeof(RawGbaPokemon));
-                if (next_off + sizeof(RawGbaPokemon) > ewram_size) break;
-                ParsedPokemon next_mon;
-                if (pokemon_parse_single(ewram + next_off, true, &next_mon)) {
-                    if (next_mon.species > 0 && next_mon.species < 2000) {
-                        out_snapshot->members[count++] = next_mon;
-                    } else break;
-                } else break;
-            }
-            out_snapshot->count = count;
-            s_cached_enemy_party_offset = (uint32_t)off;
-            return count;
+    if (s_cached_player_party_offset + (12 * sizeof(RawGbaPokemon)) + sizeof(RawGbaPokemon) <= ewram_size) {
+        candidate_offsets[num_candidates++] = s_cached_player_party_offset + (12 * sizeof(RawGbaPokemon));
+    }
+    if (s_cached_player_party_offset + (6 * sizeof(RawGbaPokemon)) + sizeof(RawGbaPokemon) <= ewram_size) {
+        candidate_offsets[num_candidates++] = s_cached_player_party_offset + (6 * sizeof(RawGbaPokemon));
+    }
+    if (config && config->enemy_party_offset > 0 && config->enemy_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
+        if (config->enemy_party_offset != s_cached_player_party_offset) {
+            candidate_offsets[num_candidates++] = config->enemy_party_offset;
         }
     }
 
+    for (int c = 0; c < num_candidates; c++) {
+        size_t off = candidate_offsets[c];
+        const RawGbaPokemon* raw = (const RawGbaPokemon*)(ewram + off);
+
+        // Fast reject: not an active enemy mon
+        if (raw->pid == 0 || raw->otid == 0 || raw->otid == player_otid) continue;
+        if (raw->max_hp == 0 || raw->max_hp > 2000) continue;
+        if (raw->current_hp > raw->max_hp) continue;
+        if (raw->current_hp == 0) continue; // Active opponent in battle must have HP > 0
+        if (raw->level == 0 || raw->level > 100) continue;
+        if (raw->attack == 0 || raw->defense == 0) continue;
+
+        ParsedPokemon test_mon;
+        if (!pokemon_parse_single((const uint8_t*)raw, true, &test_mon)) continue;
+        if (test_mon.species == 0 || test_mon.species >= 2000) continue;
+        if (test_mon.current_hp == 0) continue;
+
+        // Found active enemy party!
+        uint8_t count = 0;
+        out_snapshot->members[count++] = test_mon;
+        for (uint8_t slot = 1; slot < 6; slot++) {
+            size_t next_off = off + (slot * sizeof(RawGbaPokemon));
+            if (next_off + sizeof(RawGbaPokemon) > ewram_size) break;
+            ParsedPokemon next_mon;
+            if (pokemon_parse_single(ewram + next_off, true, &next_mon)) {
+                if (next_mon.species > 0 && next_mon.species < 2000) {
+                    out_snapshot->members[count++] = next_mon;
+                } else break;
+            } else break;
+        }
+        out_snapshot->count = count;
+        s_cached_enemy_party_offset = (uint32_t)off;
+        return count;
+    }
+
+    s_cached_enemy_party_offset = 0;
     return 0;
 }
 
