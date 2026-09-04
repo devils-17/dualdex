@@ -112,9 +112,24 @@ double libretro_host_get_target_fps(void);
 double libretro_host_get_sample_rate(void);
 
 /**
+ * Thread-safe copy of the most recent video frame buffer and metadata into dst.
+ */
+bool libretro_host_copy_video_frame(void* dst, size_t dst_capacity, unsigned int* out_w, unsigned int* out_h, size_t* out_pitch, int* out_fmt);
+
+/**
  * Flush/clear audio ring buffer to eliminate latency buildup.
  */
 void libretro_host_clear_audio(void);
+
+/**
+ * Set target audio output sample rate for resampler (default: 48000 Hz).
+ */
+void libretro_host_set_target_audio_sample_rate(uint32_t rate);
+
+/**
+ * Get the target audio output sample rate.
+ */
+uint32_t libretro_host_get_output_sample_rate(void);
 
 /**
  * Unload ROM and core.

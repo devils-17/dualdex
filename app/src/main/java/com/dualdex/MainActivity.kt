@@ -253,6 +253,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 }
                 withContext(Dispatchers.Main) {
                     if (ok) {
+                        emulatorView?.startEmulation()
                         Toast.makeText(this@MainActivity, "Loaded: ${profile.name} (${profile.engine})", Toast.LENGTH_LONG).show()
                         viewModel.selectTab(CompanionTab.PARTY)
                         companionPresentation?.refreshSavesTab()

@@ -103,8 +103,69 @@ class EmulatorSurfaceView @JvmOverloads constructor(
     @Volatile private var stretchToFit: Boolean = false
     private var surfaceWidth: Int = 1920
     private var surfaceHeight: Int = 1080
-    private var lastFrameTimeNs: Long = 0L
-    private var frameAccumulatorNs: Long = 0L
+
+    @Volatile private var isEmulating = false
+    private var emuThread: Thread? = null
+
+    fun startEmulation() {
+        if (isEmulating) return
+        isEmulating = true
+        emuThread = Thread({
+            val targetFps = 59.7275
+            val baseIntervalNs = (1_000_000_000.0 / targetFps).toLong() // 16,742,706 ns
+            var nextDeadlineNs = System.nanoTime()
+
+            while (isEmulating) {
+                val speed = speedMultiplier.coerceIn(1, 8)
+                val targetIntervalNs = (baseIntervalNs / speed).coerceAtLeast(1_000_000L)
+
+                LibretroHost.nativeStepFrame()
+
+                nextDeadlineNs += targetIntervalNs
+                val now = System.nanoTime()
+                val sleepNs = nextDeadlineNs - now
+
+                if (sleepNs > 0) {
+                    val sleepMs = sleepNs / 1_000_000L
+                    val sleepRemNs = (sleepNs % 1_000_000L).toInt()
+                    if (sleepMs > 0 || sleepRemNs > 200_000) {
+                        try {
+                            Thread.sleep(sleepMs, sleepRemNs)
+                        } catch (e: InterruptedException) {
+                            break
+                        }
+                    }
+                } else if (sleepNs < -targetIntervalNs * 3) {
+                    // Fell behind deadline by more than 3 frames (e.g. hitch or pause) -> reset deadline
+                    nextDeadlineNs = now
+                }
+            }
+        }, "DualDexEmuLoop").apply {
+            priority = Thread.MAX_PRIORITY
+            start()
+        }
+    }
+
+    fun stopEmulation() {
+        isEmulating = false
+        emuThread?.interrupt()
+        try {
+            emuThread?.join(300)
+        } catch (e: InterruptedException) {
+            // ignore
+        }
+        emuThread = null
+    }
+
+    override fun onPause() {
+        stopEmulation()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        startEmulation()
+    }
 
     init {
         setEGLContextClientVersion(2)
@@ -237,37 +298,7 @@ class EmulatorSurfaceView @JvmOverloads constructor(
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // Accumulator-based frame limiter locked to GBA hardware refresh (~59.7275 FPS)
-        val now = System.nanoTime()
-        if (lastFrameTimeNs == 0L) {
-            lastFrameTimeNs = now
-        }
-        val elapsedNs = now - lastFrameTimeNs
-        lastFrameTimeNs = now
-
-        // Clamp elapsed time to 100ms to prevent spiral-of-death on backgrounding or pause
-        val clampedElapsedNs = minOf(elapsedNs, 100_000_000L)
-        frameAccumulatorNs += clampedElapsedNs
-
-        // Base interval is 16,742,706 ns (~16.74 ms). Multiplied by fast-forward factor.
-        val targetFps = LibretroHost.nativeGetTargetFps().takeIf { it in 20.0..120.0 } ?: 59.7275
-        val baseIntervalNs = (1_000_000_000.0 / targetFps).toLong()
-        val targetIntervalNs = (baseIntervalNs / speedMultiplier).coerceAtLeast(1_000_000L)
-
-        // Step simulation for all elapsed time ticks
-        var stepsAllowed = 4 * speedMultiplier
-        while (frameAccumulatorNs >= targetIntervalNs && stepsAllowed > 0) {
-            LibretroHost.nativeStepFrame()
-            frameAccumulatorNs -= targetIntervalNs
-            stepsAllowed--
-        }
-
-        // Prevent accumulator runaway if rendering fell behind
-        if (frameAccumulatorNs > targetIntervalNs * 2) {
-            frameAccumulatorNs = 0L
-        }
-
-        // Fetch latest frame pixels
+        // Fetch latest frame pixels from native buffer (stepped at 59.7275 FPS on DualDexEmuLoop)
         pixelBuffer.position(0)
         val hasFrame = LibretroHost.nativeGetVideoFrame(pixelBuffer, frameMetadata)
 

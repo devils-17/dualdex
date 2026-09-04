@@ -267,10 +267,10 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
     out->species = raw_species & 0x07FF;
 
     uint16_t raw_item = read16_le(g_ptr + 2);
-    out->held_item = (raw_species >= 2048) ? (raw_item & 0x03FF) : raw_item;
+    out->held_item = raw_item & 0x03FF;
 
     uint32_t raw_exp = read32_le(g_ptr + 4);
-    out->experience = (raw_species >= 2048) ? (raw_exp & 0x001FFFFF) : raw_exp;
+    out->experience = raw_exp & 0x001FFFFF;
 
     uint8_t pp_bonuses = g_ptr[8];
     out->pp_bonuses[0] = (pp_bonuses >> 0) & 0x03;
@@ -342,6 +342,11 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
 
 static uint32_t s_cached_player_party_offset = 0;
 static uint32_t s_cached_enemy_party_offset = 0;
+
+void pokemon_reader_reset(void) {
+    s_cached_player_party_offset = 0;
+    s_cached_enemy_party_offset = 0;
+}
 
 uint8_t pokemon_scan_ewram_for_party(
     const uint8_t* ewram,

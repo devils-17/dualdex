@@ -1,5 +1,6 @@
 #include "libretro_host.h"
 #include "libretro.h"
+#include "pokemon_reader.h"
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,57 +108,125 @@ static void core_video_refresh_cb(const void *data, unsigned width, unsigned hei
     pthread_mutex_unlock(&g_video_mutex);
 }
 
-// Audio ring buffer (low-latency PCM, capped to prevent drift)
-#define AUDIO_RING_BUFFER_SIZE (8192)
+// Target audio rate requested by frontend/AudioTrack (default 48000 Hz)
+#define DEFAULT_TARGET_AUDIO_RATE 48000
+static uint32_t g_target_audio_rate = DEFAULT_TARGET_AUDIO_RATE;
+
+// Native audio ring buffer (stores resampled stereo PCM)
+// 16384 samples = 8192 stereo frames = ~170 ms capacity
+#define AUDIO_RING_BUFFER_SIZE (16384)
 static int16_t g_audio_ring_buffer[AUDIO_RING_BUFFER_SIZE];
 static size_t g_audio_write_pos = 0;
 static size_t g_audio_read_pos = 0;
 static pthread_mutex_t g_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+// Resampler persistent state for continuous phase across batches
+static double g_resample_phase = 0.0;
+static int16_t g_last_left = 0;
+static int16_t g_last_right = 0;
+static bool g_has_last_samples = false;
+
 void libretro_host_clear_audio(void) {
     pthread_mutex_lock(&g_audio_mutex);
     g_audio_write_pos = 0;
     g_audio_read_pos = 0;
+    g_resample_phase = 0.0;
+    g_has_last_samples = false;
     pthread_mutex_unlock(&g_audio_mutex);
 }
 
-// Audio sample callbacks
-static void core_audio_sample_cb(int16_t left, int16_t right) {
-    pthread_mutex_lock(&g_audio_mutex);
+void libretro_host_set_target_audio_sample_rate(uint32_t rate) {
+    if (rate >= 8000 && rate <= 96000) {
+        pthread_mutex_lock(&g_audio_mutex);
+        g_target_audio_rate = rate;
+        g_resample_phase = 0.0;
+        g_has_last_samples = false;
+        pthread_mutex_unlock(&g_audio_mutex);
+    }
+}
+
+uint32_t libretro_host_get_output_sample_rate(void) {
+    return g_target_audio_rate;
+}
+
+static inline void push_audio_sample(int16_t left, int16_t right) {
     g_audio_ring_buffer[g_audio_write_pos] = left;
     g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
     g_audio_ring_buffer[g_audio_write_pos] = right;
     g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
-
-    // Latency limiter: Drop stale audio if backlog exceeds ~30ms (2048 samples)
-    size_t available = (g_audio_write_pos >= g_audio_read_pos)
-        ? (g_audio_write_pos - g_audio_read_pos)
-        : (AUDIO_RING_BUFFER_SIZE - g_audio_read_pos + g_audio_write_pos);
-    if (available > 2048) {
-        g_audio_read_pos = (g_audio_write_pos + AUDIO_RING_BUFFER_SIZE - 1024) % AUDIO_RING_BUFFER_SIZE;
-    }
-    pthread_mutex_unlock(&g_audio_mutex);
 }
 
 static size_t core_audio_sample_batch_cb(const int16_t *data, size_t frames) {
     if (!data || frames == 0) return 0;
 
     pthread_mutex_lock(&g_audio_mutex);
-    size_t count = frames * 2;
-    for (size_t i = 0; i < count; i++) {
-        g_audio_ring_buffer[g_audio_write_pos] = data[i];
-        g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+
+    double in_rate = g_audio_sample_rate > 8000.0 ? g_audio_sample_rate : 65536.0;
+    double out_rate = (double)g_target_audio_rate;
+
+    if (in_rate == out_rate) {
+        // Direct passthrough when input and output rates match
+        size_t count = frames * 2;
+        for (size_t i = 0; i < count; i++) {
+            g_audio_ring_buffer[g_audio_write_pos] = data[i];
+            g_audio_write_pos = (g_audio_write_pos + 1) % AUDIO_RING_BUFFER_SIZE;
+        }
+    } else {
+        // High-precision linear interpolation resampler with continuous phase
+        double ratio = in_rate / out_rate;
+        while (g_resample_phase < (double)frames) {
+            size_t idx0 = (size_t)g_resample_phase;
+            double frac = g_resample_phase - (double)idx0;
+
+            int16_t l0, r0, l1, r1;
+            if (idx0 == 0 && g_has_last_samples && frac < 0.0001) {
+                l0 = g_last_left;
+                r0 = g_last_right;
+            } else {
+                l0 = data[idx0 * 2];
+                r0 = data[idx0 * 2 + 1];
+            }
+
+            if (idx0 + 1 < frames) {
+                l1 = data[(idx0 + 1) * 2];
+                r1 = data[(idx0 + 1) * 2 + 1];
+            } else {
+                l1 = l0;
+                r1 = r0;
+            }
+
+            int32_t out_l = (int32_t)(l0 + (l1 - l0) * frac);
+            int32_t out_r = (int32_t)(r0 + (r1 - r0) * frac);
+            if (out_l > 32767) out_l = 32767; else if (out_l < -32768) out_l = -32768;
+            if (out_r > 32767) out_r = 32767; else if (out_r < -32768) out_r = -32768;
+
+            push_audio_sample((int16_t)out_l, (int16_t)out_r);
+            g_resample_phase += ratio;
+        }
+
+        g_resample_phase -= (double)frames;
+        g_last_left = data[(frames - 1) * 2];
+        g_last_right = data[(frames - 1) * 2 + 1];
+        g_has_last_samples = true;
     }
 
-    // Latency limiter: Drop stale audio if backlog exceeds ~30ms (2048 samples)
+    // Latency limiter: Cap backlog to 4096 samples (2048 stereo frames = ~42.6ms at 48kHz).
+    // One emulation frame produces ~1607 samples at 48kHz, so 4096 is ~2.5 frames.
+    // This allows normal frame jitter without ever dropping samples, while bounding lag.
     size_t available = (g_audio_write_pos >= g_audio_read_pos)
         ? (g_audio_write_pos - g_audio_read_pos)
         : (AUDIO_RING_BUFFER_SIZE - g_audio_read_pos + g_audio_write_pos);
-    if (available > 2048) {
-        g_audio_read_pos = (g_audio_write_pos + AUDIO_RING_BUFFER_SIZE - 1024) % AUDIO_RING_BUFFER_SIZE;
+    if (available > 4096) {
+        g_audio_read_pos = (g_audio_write_pos + AUDIO_RING_BUFFER_SIZE - 2048) % AUDIO_RING_BUFFER_SIZE;
     }
+
     pthread_mutex_unlock(&g_audio_mutex);
     return frames;
+}
+
+static void core_audio_sample_cb(int16_t left, int16_t right) {
+    int16_t buf[2] = {left, right};
+    core_audio_sample_batch_cb(buf, 1);
 }
 
 size_t libretro_host_get_audio_samples(int16_t* out_buffer, size_t max_samples) {
@@ -309,6 +378,7 @@ bool libretro_host_load_rom(const char* rom_file_path) {
             }
         }
         libretro_host_clear_audio();
+        pokemon_reader_reset();
     }
     return ok;
 }
@@ -329,6 +399,28 @@ bool libretro_host_get_video_frame(EmulatorVideoFrame* out_frame) {
     return (out_frame->pixels != NULL);
 }
 
+bool libretro_host_copy_video_frame(void* dst, size_t dst_capacity, unsigned int* out_w, unsigned int* out_h, size_t* out_pitch, int* out_fmt) {
+    if (!dst || dst_capacity == 0) return false;
+
+    pthread_mutex_lock(&g_video_mutex);
+    if (!g_current_frame.pixels || g_current_frame.width == 0 || g_current_frame.height == 0) {
+        pthread_mutex_unlock(&g_video_mutex);
+        return false;
+    }
+
+    size_t copy_size = g_current_frame.pitch * g_current_frame.height;
+    if (copy_size > dst_capacity) copy_size = dst_capacity;
+    memcpy(dst, g_current_frame.pixels, copy_size);
+
+    if (out_w) *out_w = g_current_frame.width;
+    if (out_h) *out_h = g_current_frame.height;
+    if (out_pitch) *out_pitch = g_current_frame.pitch;
+    if (out_fmt) *out_fmt = g_current_frame.pixel_format;
+
+    pthread_mutex_unlock(&g_video_mutex);
+    return true;
+}
+
 void libretro_host_set_input_buttons(uint32_t button_mask) {
     g_current_buttons = button_mask;
 }
@@ -341,6 +433,13 @@ uint8_t* libretro_host_get_ewram(size_t* out_size) {
 
     void* ptr = p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
     size_t sz = p_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM);
+
+    // CRITICAL FIX: mGBA's libretro.c has a bug in retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM)
+    // where it returns GB_SIZE_WORKING_RAM (32768) instead of GBA_SIZE_EWRAM (262144).
+    // In GBA mode, mGBA's wram pointer always points to the full 256 KB (0x40000 = 262144 bytes) EWRAM block.
+    if (ptr && sz < 0x40000) {
+        sz = 0x40000;
+    }
 
     if (out_size) *out_size = sz;
     return (uint8_t*)ptr;
@@ -447,6 +546,7 @@ void libretro_host_reset(void) {
     if (g_core_handle && g_is_game_loaded && p_retro_reset) {
         p_retro_reset();
         libretro_host_clear_audio();
+        pokemon_reader_reset();
     }
 }
 

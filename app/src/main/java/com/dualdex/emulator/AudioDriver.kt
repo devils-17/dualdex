@@ -5,7 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.util.Log
 
-class AudioDriver(private var inSampleRate: Int = 32768) {
+class AudioDriver(private val defaultSampleRate: Int = 48000) {
 
     private var audioTrack: AudioTrack? = null
     @Volatile private var isRunning = false
@@ -15,25 +15,24 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
         if (isRunning) return
 
         try {
-            val coreRate = LibretroHost.nativeGetAudioSampleRate().toInt().takeIf { it in 8000..96000 } ?: inSampleRate
-            inSampleRate = coreRate
-
-            val canUseCoreRate = AudioTrack.getMinBufferSize(coreRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT) > 0
-
-            val effectiveRate = if (canUseCoreRate) {
-                coreRate
+            // Android native mixer runs at 48000 Hz on modern Snapdragon chipsets
+            val effectiveRate = if (AudioTrack.getMinBufferSize(48000, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT) > 0) {
+                48000
             } else if (AudioTrack.getMinBufferSize(44100, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT) > 0) {
                 44100
             } else {
-                48000
+                defaultSampleRate
             }
+
+            // Instruct native host to resample mGBA's 65536 Hz stream to this exact rate in C
+            LibretroHost.nativeSetTargetAudioSampleRate(effectiveRate)
 
             val minBufferSize = AudioTrack.getMinBufferSize(
                 effectiveRate,
                 AudioFormat.CHANNEL_OUT_STEREO,
                 AudioFormat.ENCODING_PCM_16BIT
             )
-            val bufferSize = minBufferSize.coerceAtLeast(2048)
+            val bufferSize = minBufferSize.coerceAtLeast(4096)
 
             val builder = AudioTrack.Builder()
                 .setAudioAttributes(
@@ -60,49 +59,16 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
             audioTrack?.play()
             isRunning = true
 
-            val needsResample = (effectiveRate != coreRate)
-            val resampleRatio = if (needsResample) coreRate.toDouble() / effectiveRate.toDouble() else 1.0
-
             audioThread = Thread({
-                val rawBuf = ShortArray(1024)
-                val resampleBuf = if (needsResample) {
-                    val maxCapacity = (1024 * (effectiveRate.toDouble() / coreRate.toDouble()) + 128).toInt()
-                    ShortArray(maxCapacity)
-                } else rawBuf
+                val sampleBuf = ShortArray(1024)
 
                 while (isRunning) {
-                    val count = LibretroHost.nativeGetAudioSamples(rawBuf)
+                    val count = LibretroHost.nativeGetAudioSamples(sampleBuf)
                     if (count > 0) {
                         try {
-                            if (!needsResample) {
-                                audioTrack?.write(rawBuf, 0, count)
-                            } else {
-                                val framesIn = count / 2
-                                val framesOut = (framesIn / resampleRatio).toInt()
-                                var outIdx = 0
-                                for (f in 0 until framesOut) {
-                                    val currentSrcFrame = f * resampleRatio
-                                    val idx0 = currentSrcFrame.toInt()
-                                    val frac = (currentSrcFrame - idx0).toFloat()
-                                    val idx1 = minOf(idx0 + 1, framesIn - 1)
-
-                                    val left0 = rawBuf[idx0 * 2].toFloat()
-                                    val right0 = rawBuf[idx0 * 2 + 1].toFloat()
-                                    val left1 = rawBuf[idx1 * 2].toFloat()
-                                    val right1 = rawBuf[idx1 * 2 + 1].toFloat()
-
-                                    val outL = (left0 + (left1 - left0) * frac).toInt().coerceIn(-32768, 32767).toShort()
-                                    val outR = (right0 + (right1 - right0) * frac).toInt().coerceIn(-32768, 32767).toShort()
-
-                                    if (outIdx + 1 < resampleBuf.size) {
-                                        resampleBuf[outIdx++] = outL
-                                        resampleBuf[outIdx++] = outR
-                                    }
-                                }
-                                audioTrack?.write(resampleBuf, 0, outIdx)
-                            }
+                            audioTrack?.write(sampleBuf, 0, count)
                         } catch (e: Exception) {
-                            // ignore
+                            // ignore write error during track shutdown
                         }
                     } else {
                         try {
@@ -117,7 +83,7 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
                 start()
             }
 
-            Log.i("DualDexAudio", "AudioDriver started (core=${coreRate}Hz, track=${effectiveRate}Hz, resample=$needsResample)")
+            Log.i("DualDexAudio", "AudioDriver started (native resampled to ${effectiveRate}Hz, low-latency mode)")
         } catch (e: Exception) {
             Log.e("DualDexAudio", "Failed to start AudioDriver: ${e.message}")
         }
@@ -131,7 +97,11 @@ class AudioDriver(private var inSampleRate: Int = 32768) {
     fun stop() {
         isRunning = false
         audioThread?.interrupt()
-        audioThread?.join(500)
+        try {
+            audioThread?.join(300)
+        } catch (e: InterruptedException) {
+            // ignore
+        }
         audioThread = null
         try {
             audioTrack?.stop()

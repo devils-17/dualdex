@@ -15,6 +15,8 @@ object LibretroHost {
     external fun nativeGetVideoFrame(directBuffer: ByteBuffer, outMetadata: IntArray): Boolean
     external fun nativeGetAudioSamples(outBuffer: ShortArray): Int
     external fun nativeClearAudio()
+    external fun nativeSetTargetAudioSampleRate(rate: Int)
+    external fun nativeGetOutputAudioSampleRate(): Int
     external fun nativeReadPartyFromCore(gameId: Int): Array<ParsedPokemon>?
     external fun nativeReadEnemyPartyFromCore(gameId: Int): Array<ParsedPokemon>?
     external fun nativeSaveState(statePath: String): Boolean

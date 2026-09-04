@@ -297,29 +297,25 @@ Java_com_dualdex_emulator_LibretroHost_nativeGetVideoFrame(
     jintArray out_metadata
 ) {
     (void)thiz;
-    EmulatorVideoFrame frame;
-    if (!libretro_host_get_video_frame(&frame) || !frame.pixels) {
-        return JNI_FALSE;
-    }
-
     void* dst = (*env)->GetDirectBufferAddress(env, direct_buffer);
     if (!dst) return JNI_FALSE;
 
     jlong dst_capacity = (*env)->GetDirectBufferCapacity(env, direct_buffer);
-    size_t copy_size = (size_t)(frame.pitch * frame.height);
-    if (dst_capacity < 0 || copy_size > (size_t)dst_capacity) {
-        copy_size = (dst_capacity > 0) ? (size_t)dst_capacity : 0;
-    }
-    if (copy_size > 0) {
-        memcpy(dst, frame.pixels, copy_size);
-    }
+    if (dst_capacity <= 0) return JNI_FALSE;
+
+    unsigned int w = 0, h = 0;
+    size_t pitch = 0;
+    int fmt = 0;
+
+    bool ok = libretro_host_copy_video_frame(dst, (size_t)dst_capacity, &w, &h, &pitch, &fmt);
+    if (!ok) return JNI_FALSE;
 
     if (out_metadata) {
         jint meta[4] = {
-            (jint)frame.width,
-            (jint)frame.height,
-            (jint)frame.pitch,
-            (jint)frame.pixel_format
+            (jint)w,
+            (jint)h,
+            (jint)pitch,
+            (jint)fmt
         };
         (*env)->SetIntArrayRegion(env, out_metadata, 0, 4, meta);
     }
@@ -350,6 +346,27 @@ Java_com_dualdex_emulator_LibretroHost_nativeClearAudio(
     (void)env;
     (void)thiz;
     libretro_host_clear_audio();
+}
+
+JNIEXPORT void JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeSetTargetAudioSampleRate(
+    JNIEnv* env,
+    jobject thiz,
+    jint rate
+) {
+    (void)env;
+    (void)thiz;
+    libretro_host_set_target_audio_sample_rate((uint32_t)rate);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeGetOutputAudioSampleRate(
+    JNIEnv* env,
+    jobject thiz
+) {
+    (void)env;
+    (void)thiz;
+    return (jint)libretro_host_get_output_sample_rate();
 }
 
 JNIEXPORT jobjectArray JNICALL

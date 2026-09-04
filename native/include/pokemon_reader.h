@@ -59,6 +59,11 @@ bool pokemon_parse_single(const uint8_t* raw_bytes, bool is_party_mon, ParsedPok
 GbaGameId pokemon_detect_game(const char* rom_title_16);
 
 /**
+ * Reset cached party memory offsets (e.g. on ROM load or core reset).
+ */
+void pokemon_reader_reset(void);
+
+/**
  * Get memory configuration for a detected game.
  */
 const GameMemoryConfig* pokemon_get_game_config(GbaGameId game_id);
