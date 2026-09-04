@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Bundle
 import android.view.Display
 import android.view.ViewGroup
+import android.net.Uri
 import com.dualdex.companion.ui.CompanionScreenView
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
@@ -17,7 +18,11 @@ class CompanionPresentation(
     private val onShaderChanged: ((com.dualdex.emulator.ShaderFilter) -> Unit)? = null,
     private val onSpeedChanged: ((Int) -> Unit)? = null,
     private val onImportSaveRequested: (() -> Unit)? = null,
-    private val onExportSaveRequested: (() -> Unit)? = null
+    private val onExportSaveRequested: (() -> Unit)? = null,
+    private val onChooseRomsFolderRequested: (() -> Unit)? = null,
+    private val onRefreshRomsRequested: (() -> Unit)? = null,
+    private val onPlayRomRequested: ((Uri, String) -> Unit)? = null,
+    private val onStretchChanged: ((Boolean) -> Unit)? = null
 ) : Presentation(context, display) {
 
     private var companionScreenView: CompanionScreenView? = null
@@ -33,7 +38,11 @@ class CompanionPresentation(
             onShaderChanged = onShaderChanged,
             onSpeedChanged = onSpeedChanged,
             onImportSaveRequested = onImportSaveRequested,
-            onExportSaveRequested = onExportSaveRequested
+            onExportSaveRequested = onExportSaveRequested,
+            onChooseRomsFolderRequested = onChooseRomsFolderRequested,
+            onRefreshRomsRequested = onRefreshRomsRequested,
+            onPlayRomRequested = onPlayRomRequested,
+            onStretchChanged = onStretchChanged
         ).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -66,5 +75,9 @@ class CompanionPresentation(
 
     fun refreshSavesTab() {
         companionScreenView?.refreshSavesTab()
+    }
+
+    fun refreshHomeScreen() {
+        companionScreenView?.refreshHomeScreen()
     }
 }

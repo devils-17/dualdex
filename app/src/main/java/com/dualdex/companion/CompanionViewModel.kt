@@ -1,5 +1,6 @@
 package com.dualdex.companion
 
+import android.net.Uri
 import com.dualdex.emulator.LibretroHost
 import com.dualdex.pokemon.ParsedPokemon
 import com.dualdex.romhack.RomHackProfile
@@ -8,7 +9,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+data class RomItem(
+    val title: String,
+    val fileName: String,
+    val uri: Uri,
+    val sizeFormatted: String
+)
+
 enum class CompanionTab(val title: String, val iconEmoji: String) {
+    HOME("Home", "🏠"),
     PARTY("Party", "👥"),
     CALC("Calc", "⚔️"),
     TYPES("Types", "🛡️"),
@@ -21,8 +30,11 @@ enum class CompanionTab(val title: String, val iconEmoji: String) {
 class CompanionViewModel(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 ) {
-    private val _selectedTab = MutableStateFlow(CompanionTab.PARTY)
+    private val _selectedTab = MutableStateFlow(CompanionTab.HOME)
     val selectedTab: StateFlow<CompanionTab> = _selectedTab.asStateFlow()
+
+    private val _scannedRoms = MutableStateFlow<List<RomItem>>(emptyList())
+    val scannedRoms: StateFlow<List<RomItem>> = _scannedRoms.asStateFlow()
 
     private val _playerParty = MutableStateFlow<List<ParsedPokemon>>(emptyList())
     val playerParty: StateFlow<List<ParsedPokemon>> = _playerParty.asStateFlow()
@@ -49,6 +61,10 @@ class CompanionViewModel(
 
     fun selectTab(tab: CompanionTab) {
         _selectedTab.value = tab
+    }
+
+    fun setScannedRoms(roms: List<RomItem>) {
+        _scannedRoms.value = roms
     }
 
     fun selectMember(index: Int) {

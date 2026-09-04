@@ -95,6 +95,17 @@ uint8_t pokemon_read_enemy_party(
     PartySnapshot* out_snapshot
 );
 
+/**
+ * Dynamically scan the entire 256 KB EWRAM for the active party.
+ * Essential for pokeemerald-expansion (Heart & Soul) and ROM hacks
+ * where gPlayerParty is placed at non-standard memory addresses.
+ */
+uint8_t pokemon_scan_ewram_for_party(
+    const uint8_t* ewram,
+    size_t ewram_size,
+    PartySnapshot* out_snapshot
+);
+
 #ifdef __cplusplus
 }
 #endif

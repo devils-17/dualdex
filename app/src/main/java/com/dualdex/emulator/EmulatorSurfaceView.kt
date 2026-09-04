@@ -100,6 +100,11 @@ class EmulatorSurfaceView @JvmOverloads constructor(
 
     private val vertexBuffer: FloatBuffer
     private val texCoordBuffer: FloatBuffer
+    @Volatile private var stretchToFit: Boolean = false
+    private var surfaceWidth: Int = 1920
+    private var surfaceHeight: Int = 1080
+    private var lastFrameTimeNs: Long = 0L
+    private var frameAccumulatorNs: Long = 0L
 
     init {
         setEGLContextClientVersion(2)
@@ -108,7 +113,7 @@ class EmulatorSurfaceView @JvmOverloads constructor(
         isFocusable = true
         isFocusableInTouchMode = true
 
-        // 3:2 aspect ratio scaling for AYN Thor 16:9 top display (1920x1080)
+        // Initial 3:2 aspect ratio scaling
         val aspectScaleX = 0.84375f
         val quadVertices = floatArrayOf(
             -aspectScaleX, -1.0f,
@@ -137,6 +142,49 @@ class EmulatorSurfaceView @JvmOverloads constructor(
                 put(texCoords)
                 position(0)
             }
+    }
+
+    fun setStretchToFit(stretch: Boolean) {
+        stretchToFit = stretch
+        queueEvent {
+            updateVertices()
+        }
+    }
+
+    fun isStretchToFit(): Boolean = stretchToFit
+
+    private fun updateVertices() {
+        val quadVertices = if (stretchToFit) {
+            // Stretch edge-to-edge (no letterbox/pillarbox)
+            floatArrayOf(
+                -1.0f, -1.0f,
+                 1.0f, -1.0f,
+                -1.0f,  1.0f,
+                 1.0f,  1.0f
+            )
+        } else {
+            // Authentic 3:2 GBA aspect ratio (240x160 = 1.5)
+            val gbaAspect = 1.5f
+            val screenAspect = if (surfaceHeight > 0) surfaceWidth.toFloat() / surfaceHeight.toFloat() else (16f / 9f)
+            val scaleX: Float
+            val scaleY: Float
+            if (screenAspect > gbaAspect) {
+                scaleX = gbaAspect / screenAspect
+                scaleY = 1.0f
+            } else {
+                scaleX = 1.0f
+                scaleY = screenAspect / gbaAspect
+            }
+            floatArrayOf(
+                -scaleX, -scaleY,
+                 scaleX, -scaleY,
+                -scaleX,  scaleY,
+                 scaleX,  scaleY
+            )
+        }
+        vertexBuffer.position(0)
+        vertexBuffer.put(quadVertices)
+        vertexBuffer.position(0)
     }
 
     fun setShaderFilter(filter: ShaderFilter) {
@@ -180,16 +228,43 @@ class EmulatorSurfaceView @JvmOverloads constructor(
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        surfaceWidth = width
+        surfaceHeight = height
         GLES20.glViewport(0, 0, width, height)
+        updateVertices()
     }
 
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // Fast-Forward emulation steps
-        val steps = speedMultiplier
-        for (i in 0 until steps) {
+        // Accumulator-based frame limiter locked to GBA hardware refresh (~59.7275 FPS)
+        val now = System.nanoTime()
+        if (lastFrameTimeNs == 0L) {
+            lastFrameTimeNs = now
+        }
+        val elapsedNs = now - lastFrameTimeNs
+        lastFrameTimeNs = now
+
+        // Clamp elapsed time to 100ms to prevent spiral-of-death on backgrounding or pause
+        val clampedElapsedNs = minOf(elapsedNs, 100_000_000L)
+        frameAccumulatorNs += clampedElapsedNs
+
+        // Base interval is 16,742,706 ns (~16.74 ms). Multiplied by fast-forward factor.
+        val targetFps = LibretroHost.nativeGetTargetFps().takeIf { it in 20.0..120.0 } ?: 59.7275
+        val baseIntervalNs = (1_000_000_000.0 / targetFps).toLong()
+        val targetIntervalNs = (baseIntervalNs / speedMultiplier).coerceAtLeast(1_000_000L)
+
+        // Step simulation for all elapsed time ticks
+        var stepsAllowed = 4 * speedMultiplier
+        while (frameAccumulatorNs >= targetIntervalNs && stepsAllowed > 0) {
             LibretroHost.nativeStepFrame()
+            frameAccumulatorNs -= targetIntervalNs
+            stepsAllowed--
+        }
+
+        // Prevent accumulator runaway if rendering fell behind
+        if (frameAccumulatorNs > targetIntervalNs * 2) {
+            frameAccumulatorNs = 0L
         }
 
         // Fetch latest frame pixels

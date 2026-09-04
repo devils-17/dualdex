@@ -33,6 +33,8 @@ static void* g_core_handle = NULL;
 static bool g_is_game_loaded = false;
 static uint32_t g_current_buttons = 0;
 static enum retro_pixel_format g_pixel_format = RETRO_PIXEL_FORMAT_RGB565;
+static double g_target_fps = 59.7275;
+static double g_audio_sample_rate = 32768.0;
 
 // Framebuffer storage (GBA max native resolution 240x160)
 #define MAX_FB_WIDTH 512
@@ -272,6 +274,17 @@ bool libretro_host_load_rom(const char* rom_file_path) {
     if (ok) {
         g_is_game_loaded = true;
         p_retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+        if (p_retro_get_system_av_info) {
+            struct retro_system_av_info av_info;
+            memset(&av_info, 0, sizeof(av_info));
+            p_retro_get_system_av_info(&av_info);
+            if (av_info.timing.fps > 10.0 && av_info.timing.fps < 200.0) {
+                g_target_fps = av_info.timing.fps;
+            }
+            if (av_info.timing.sample_rate >= 8000.0 && av_info.timing.sample_rate <= 96000.0) {
+                g_audio_sample_rate = av_info.timing.sample_rate;
+            }
+        }
     }
     return ok;
 }
@@ -410,6 +423,14 @@ void libretro_host_reset(void) {
     if (g_core_handle && g_is_game_loaded && p_retro_reset) {
         p_retro_reset();
     }
+}
+
+double libretro_host_get_target_fps(void) {
+    return g_target_fps;
+}
+
+double libretro_host_get_sample_rate(void) {
+    return g_audio_sample_rate;
 }
 
 void libretro_host_cleanup(void) {

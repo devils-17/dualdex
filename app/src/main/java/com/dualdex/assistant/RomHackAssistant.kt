@@ -29,10 +29,17 @@ object RomHackAssistant {
 
     private const val TAG = "DualDexAssistant"
     private var customApiKey: String? = null
+    private var activeModel: String = "gemini-3.8-flash"
 
     fun setApiKey(key: String?) {
         customApiKey = key
     }
+
+    fun setModel(model: String) {
+        activeModel = model
+    }
+
+    fun getModel(): String = activeModel
 
     suspend fun askQuestion(
         context: Context? = null,
@@ -71,9 +78,16 @@ object RomHackAssistant {
 
         if (!apiKey.isNullOrBlank()) {
             try {
-                return@withContext queryGeminiWithSearchGrounding(apiKey, fullPrompt)
+                return@withContext queryGeminiWithSearchGrounding(apiKey, fullPrompt, activeModel)
             } catch (e: Exception) {
-                Log.w(TAG, "Gemini API call failed, using smart offline fallback: ${e.message}")
+                Log.w(TAG, "Gemini API call failed, attempting fallback or smart offline: ${e.message}")
+                if (activeModel != "gemini-2.5-flash") {
+                    try {
+                        return@withContext queryGeminiWithSearchGrounding(apiKey, fullPrompt, "gemini-2.5-flash")
+                    } catch (e2: Exception) {
+                        Log.w(TAG, "Gemini fallback failed: ${e2.message}")
+                    }
+                }
             }
         }
 
@@ -81,8 +95,8 @@ object RomHackAssistant {
         return@withContext generateOfflineKnowledgeResponse(userQuestion, profile.name)
     }
 
-    private fun queryGeminiWithSearchGrounding(apiKey: String, prompt: String): AssistantResponse {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+    private fun queryGeminiWithSearchGrounding(apiKey: String, prompt: String, model: String = "gemini-3.8-flash"): AssistantResponse {
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
         val url = URL(endpoint)
         val conn = url.openConnection() as HttpURLConnection
 

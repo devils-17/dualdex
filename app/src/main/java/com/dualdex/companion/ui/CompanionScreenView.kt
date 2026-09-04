@@ -12,6 +12,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.net.Uri
 import android.widget.TextView
 import com.dualdex.companion.CompanionTab
 import com.dualdex.companion.CompanionViewModel
@@ -27,7 +28,11 @@ class CompanionScreenView(
     private val onShaderChanged: ((ShaderFilter) -> Unit)? = null,
     private val onSpeedChanged: ((Int) -> Unit)? = null,
     private val onImportSaveRequested: (() -> Unit)? = null,
-    private val onExportSaveRequested: (() -> Unit)? = null
+    private val onExportSaveRequested: (() -> Unit)? = null,
+    private val onChooseRomsFolderRequested: (() -> Unit)? = null,
+    private val onRefreshRomsRequested: (() -> Unit)? = null,
+    private val onPlayRomRequested: ((Uri, String) -> Unit)? = null,
+    private val onStretchChanged: ((Boolean) -> Unit)? = null
 ) : LinearLayout(context) {
 
     private val contentContainer: FrameLayout
@@ -37,13 +42,14 @@ class CompanionScreenView(
     private val battleBadge: TextView
     private val batteryView: TextView
 
+    private val homeView: HomeScreenView by lazy { HomeScreenView(context, viewModel, onChooseRomsFolderRequested, onRefreshRomsRequested, onPlayRomRequested) }
     private val partyView: PartyScreenView by lazy { PartyScreenView(context, viewModel) }
     private val calcView: CalcTabScreenView by lazy { CalcTabScreenView(context, viewModel) }
     private val typesView: TypeChartScreenView by lazy { TypeChartScreenView(context, viewModel) }
     private val docsView: DocsScreenView by lazy { DocsScreenView(context, viewModel) }
     private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel, onImportSaveRequested, onExportSaveRequested) }
     private val assistantView: com.dualdex.assistant.AssistantScreenView by lazy { com.dualdex.assistant.AssistantScreenView(context, viewModel) }
-    private val settingsView: SettingsScreenView by lazy { SettingsScreenView(context, viewModel, onShaderChanged, onSpeedChanged) }
+    private val settingsView: SettingsScreenView by lazy { SettingsScreenView(context, viewModel, onShaderChanged, onSpeedChanged, onStretchChanged) }
 
     private val statusUpdateRunnable = object : Runnable {
         override fun run() {
@@ -180,6 +186,11 @@ class CompanionScreenView(
         contentContainer.removeAllViews()
 
         val activeView: View = when (tab) {
+            CompanionTab.HOME -> {
+                homeView.updateResumeCard()
+                homeView.updateFolderStatus()
+                homeView
+            }
             CompanionTab.PARTY -> {
                 partyView.refreshUI()
                 partyView
@@ -214,10 +225,18 @@ class CompanionScreenView(
         }
     }
 
+    fun refreshHomeScreen() {
+        post {
+            homeView.updateResumeCard()
+            homeView.updateFolderStatus()
+        }
+    }
+
     fun notifyProfileChanged() {
         post {
             val prof = viewModel.activeProfile.value
             profileLabel.text = "⚡ ${prof.name}"
+            if (viewModel.selectedTab.value == CompanionTab.HOME) homeView.updateResumeCard()
             if (viewModel.selectedTab.value == CompanionTab.PARTY) partyView.refreshUI()
             if (viewModel.selectedTab.value == CompanionTab.CALC) calcView.refreshUI()
             if (viewModel.selectedTab.value == CompanionTab.TYPES) typesView.updateMatchupDisplay()

@@ -460,6 +460,20 @@ Java_com_dualdex_emulator_LibretroHost_nativeCleanup(JNIEnv* env, jobject thiz) 
     libretro_host_cleanup();
 }
 
+JNIEXPORT jdouble JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeGetTargetFps(JNIEnv* env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jdouble)libretro_host_get_target_fps();
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeGetAudioSampleRate(JNIEnv* env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jdouble)libretro_host_get_sample_rate();
+}
+
 // -------------------------------------------------------------
 // QuickJS Damage Calculator JNI
 // -------------------------------------------------------------

@@ -77,7 +77,7 @@ class AssistantScreenView(
         headerBar.addView(titleView)
 
         val subTitle = TextView(context).apply {
-            text = "Powered by Google Gemini 2.5 Flash + Google Search Grounding"
+            text = "Powered by Google Gemini Flash 3.8 + Google Search Grounding"
             setTextColor(0xFF4A9EFF.toInt())
             textSize = 12.5f
             setPadding(0, 2, 0, 0)

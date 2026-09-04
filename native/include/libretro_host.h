@@ -102,6 +102,16 @@ bool libretro_host_flush_save_ram(const char* save_path);
 void libretro_host_reset(void);
 
 /**
+ * Get core target FPS (typically 59.7275).
+ */
+double libretro_host_get_target_fps(void);
+
+/**
+ * Get core audio sample rate in Hz (typically 32768 or 44100).
+ */
+double libretro_host_get_sample_rate(void);
+
+/**
  * Unload ROM and core.
  */
 void libretro_host_cleanup(void);

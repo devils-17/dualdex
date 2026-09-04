@@ -1,6 +1,7 @@
 package com.dualdex
 
 import android.content.Context
+import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
@@ -11,13 +12,17 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.dualdex.assistant.RomHackAssistant
 import com.dualdex.calculator.DamageCalculator
 import com.dualdex.companion.CompanionPresentation
+import com.dualdex.companion.CompanionTab
 import com.dualdex.companion.CompanionViewModel
+import com.dualdex.companion.RomItem
 import com.dualdex.companion.ui.CompanionScreenView
 import com.dualdex.emulator.AudioDriver
 import com.dualdex.emulator.EmulatorSurfaceView
@@ -27,13 +32,16 @@ import com.dualdex.emulator.ShaderFilter
 import com.dualdex.romhack.ProfileLoader
 import com.dualdex.romhack.RomHackDetector
 import com.dualdex.romhack.RomHackProfile
+import com.dualdex.settings.SettingsManager
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 
 class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     private val viewModel = CompanionViewModel()
     private val saveStateManager by lazy { SaveStateManager(this) }
+    private val settingsManager by lazy { SettingsManager(this) }
     private var emulatorView: EmulatorSurfaceView? = null
     private var companionPresentation: CompanionPresentation? = null
     private var currentCompanionScreenView: CompanionScreenView? = null
@@ -44,6 +52,21 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
     private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             handleSelectedRom(uri)
+        }
+    }
+
+    private val chooseFolderLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                Log.w("DualDex", "Could not take persistable URI permission: ${e.message}")
+            }
+            settingsManager.romsFolderUri = uri.toString()
+            scanRomsDirectory(uri)
         }
     }
 
@@ -70,6 +93,50 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 Toast.makeText(this@MainActivity, "Exported battery save successfully!", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(this@MainActivity, "Failed to export battery save", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun scanRomsDirectory(folderUri: Uri) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val rootDoc = DocumentFile.fromTreeUri(applicationContext, folderUri)
+                if (rootDoc == null || !rootDoc.isDirectory) {
+                    Log.w("DualDex", "Selected URI is not a valid directory: $folderUri")
+                    return@launch
+                }
+
+                val romList = mutableListOf<RomItem>()
+                val files = rootDoc.listFiles()
+                for (file in files) {
+                    val name = file.name ?: continue
+                    if (name.endsWith(".gba", ignoreCase = true) || name.endsWith(".bin", ignoreCase = true)) {
+                        val title = name.substringBeforeLast(".")
+                        val length = file.length()
+                        val formattedSize = if (length >= 1024 * 1024) {
+                            String.format(Locale.US, "%.1f MB", length / (1024.0 * 1024.0))
+                        } else {
+                            "${length / 1024} KB"
+                        }
+                        romList.add(
+                            RomItem(
+                                title = title,
+                                fileName = name,
+                                uri = file.uri,
+                                sizeFormatted = formattedSize
+                            )
+                        )
+                    }
+                }
+                romList.sortBy { it.title.lowercase() }
+
+                withContext(Dispatchers.Main) {
+                    viewModel.setScannedRoms(romList)
+                    companionPresentation?.refreshHomeScreen()
+                    currentCompanionScreenView?.refreshHomeScreen()
+                }
+            } catch (e: Exception) {
+                Log.e("DualDex", "Error scanning ROMs directory: ${e.message}", e)
             }
         }
     }
@@ -112,10 +179,27 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
             displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
             displayManager?.registerDisplayListener(this, null)
 
-            // 5. Setup display UI
+            // 5. Apply saved Gemini settings
+            val apiKey = settingsManager.geminiApiKey
+            if (!apiKey.isNullOrBlank()) {
+                RomHackAssistant.setApiKey(apiKey)
+            }
+            RomHackAssistant.setModel(settingsManager.geminiModel)
+
+            // 6. Setup display UI
             setupDisplays()
 
-            // 6. Start background memory poller (10Hz)
+            // 7. Scan saved ROMs folder if available
+            val savedFolder = settingsManager.romsFolderUri
+            if (!savedFolder.isNullOrBlank()) {
+                try {
+                    scanRomsDirectory(Uri.parse(savedFolder))
+                } catch (e: Exception) {
+                    Log.w("DualDex", "Failed to scan saved ROMs folder: ${e.message}")
+                }
+            }
+
+            // 8. Start background memory poller (10Hz)
             viewModel.startPolling(100L)
         } catch (e: Throwable) {
             Log.e("DualDex", "Fatal error in onCreate: ${e.message}", e)
@@ -123,7 +207,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
         }
     }
 
-    private fun handleSelectedRom(uri: Uri) {
+    private fun handleSelectedRom(uri: Uri, preferredTitle: String? = null) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 // Copy URI stream to a local cache file for Libretro dlopen/fopen access
@@ -146,6 +230,10 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
                 // Detect ROM Hack Profile via SHA-256 and header title
                 val profile = RomHackDetector.detectProfile(localRomFile, loadedProfiles)
+                val gameTitle = preferredTitle ?: profile.name.ifEmpty { "current_game" }
+                settingsManager.lastPlayedRomUri = uri.toString()
+                settingsManager.lastPlayedRomTitle = gameTitle
+
                 withContext(Dispatchers.Main) {
                     viewModel.setProfile(profile)
                 }
@@ -164,8 +252,11 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 withContext(Dispatchers.Main) {
                     if (ok) {
                         Toast.makeText(this@MainActivity, "Loaded: ${profile.name} (${profile.engine})", Toast.LENGTH_LONG).show()
+                        viewModel.selectTab(CompanionTab.PARTY)
                         companionPresentation?.refreshSavesTab()
                         currentCompanionScreenView?.refreshSavesTab()
+                        companionPresentation?.refreshHomeScreen()
+                        currentCompanionScreenView?.refreshHomeScreen()
                     } else {
                         Toast.makeText(this@MainActivity, "Failed to load ROM in mGBA core", Toast.LENGTH_SHORT).show()
                     }
@@ -200,6 +291,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
+                setStretchToFit(settingsManager.isStretchToFitEnabled)
             }
             setContentView(emulatorView)
 
@@ -225,6 +317,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 0,
                 1.0f
             )
+            setStretchToFit(settingsManager.isStretchToFitEnabled)
         }
         splitLayout.addView(emulatorView)
 
@@ -238,6 +331,21 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
             onExportSaveRequested = {
                 val key = viewModel.activeRomTitle.value.ifEmpty { "current_game" }.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
                 exportSaveLauncher.launch("$key.sav")
+            },
+            onChooseRomsFolderRequested = { chooseFolderLauncher.launch(null) },
+            onRefreshRomsRequested = {
+                val folder = settingsManager.romsFolderUri
+                if (!folder.isNullOrBlank()) {
+                    scanRomsDirectory(Uri.parse(folder))
+                } else {
+                    chooseFolderLauncher.launch(null)
+                }
+            },
+            onPlayRomRequested = { uri: Uri, title: String ->
+                handleSelectedRom(uri, title)
+            },
+            onStretchChanged = { stretch: Boolean ->
+                emulatorView?.setStretchToFit(stretch)
             }
         ).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -266,6 +374,21 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 onExportSaveRequested = {
                     val key = viewModel.activeRomTitle.value.ifEmpty { "current_game" }.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
                     exportSaveLauncher.launch("$key.sav")
+                },
+                onChooseRomsFolderRequested = { chooseFolderLauncher.launch(null) },
+                onRefreshRomsRequested = {
+                    val folder = settingsManager.romsFolderUri
+                    if (!folder.isNullOrBlank()) {
+                        scanRomsDirectory(Uri.parse(folder))
+                    } else {
+                        chooseFolderLauncher.launch(null)
+                    }
+                },
+                onPlayRomRequested = { uri: Uri, title: String ->
+                    handleSelectedRom(uri, title)
+                },
+                onStretchChanged = { stretch: Boolean ->
+                    emulatorView?.setStretchToFit(stretch)
                 }
             ).apply {
                 show()

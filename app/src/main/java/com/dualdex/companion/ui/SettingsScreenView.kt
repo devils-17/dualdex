@@ -15,7 +15,8 @@ class SettingsScreenView(
     context: Context,
     private val viewModel: CompanionViewModel,
     private val onShaderChanged: ((ShaderFilter) -> Unit)? = null,
-    private val onSpeedChanged: ((Int) -> Unit)? = null
+    private val onSpeedChanged: ((Int) -> Unit)? = null,
+    private val onStretchChanged: ((Boolean) -> Unit)? = null
 ) : LinearLayout(context) {
 
     private val settingsManager = SettingsManager(context)
@@ -49,7 +50,7 @@ class SettingsScreenView(
         // 1. Display & Retro Shaders Card
         val shaderCard = createCardLayout().apply {
             val label = TextView(context).apply {
-                text = "Retro Display Shaders"
+                text = "Retro Display Shaders & Scaling"
                 setTextColor(0xFF4A9EFF.toInt())
                 textSize = 15f
                 typeface = Typeface.DEFAULT_BOLD
@@ -89,6 +90,31 @@ class SettingsScreenView(
 
             shaderDescView.text = "${curFilter.displayName}: ${curFilter.description}"
             addView(shaderDescView)
+
+            // Stretch to fill screen toggle (My Boy! mode)
+            val isStretch = settingsManager.isStretchToFitEnabled
+            val stretchBtn = Button(context).apply {
+                text = if (isStretch) "📱 Aspect Ratio: Stretch to Fill Screen" else "📺 Aspect Ratio: 3:2 Standard (Letterbox)"
+                setTextColor(Color.WHITE)
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                background = GradientDrawable().apply {
+                    cornerRadius = 12f
+                    setColor(if (isStretch) 0xFF2E6B4A.toInt() else 0xFF2B3A55.toInt())
+                }
+                setPadding(14, 10, 14, 10)
+                setOnClickListener {
+                    val newState = !settingsManager.isStretchToFitEnabled
+                    settingsManager.isStretchToFitEnabled = newState
+                    onStretchChanged?.invoke(newState)
+                    text = if (newState) "📱 Aspect Ratio: Stretch to Fill Screen" else "📺 Aspect Ratio: 3:2 Standard (Letterbox)"
+                    (background as? GradientDrawable)?.setColor(if (newState) 0xFF2E6B4A.toInt() else 0xFF2B3A55.toInt())
+                }
+            }
+            val lpStretch = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 10, 0, 0)
+            }
+            addView(stretchBtn, lpStretch)
         }
         content.addView(shaderCard)
 
@@ -201,6 +227,53 @@ class SettingsScreenView(
                 setPadding(16, 10, 16, 10)
             }
             addView(apiKeyInput)
+
+            val modelLabel = TextView(context).apply {
+                text = "Active AI Model"
+                setTextColor(0xFF4A9EFF.toInt())
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 10, 0, 4)
+            }
+            addView(modelLabel)
+
+            val modelRow = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                setPadding(0, 0, 0, 10)
+            }
+
+            val models = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.0-flash")
+            val modelLabels = listOf("Flash 3.8", "Flash 2.5", "Flash 2.0")
+
+            fun updateModelRow() {
+                modelRow.removeAllViews()
+                val currentModel = settingsManager.geminiModel
+                models.forEachIndexed { i, m ->
+                    val isSel = (m == currentModel)
+                    val mBtn = Button(context).apply {
+                        text = modelLabels[i]
+                        textSize = 11f
+                        setTextColor(Color.WHITE)
+                        background = GradientDrawable().apply {
+                            cornerRadius = 10f
+                            setColor(if (isSel) 0xFF4A9EFF.toInt() else 0xFF282834.toInt())
+                        }
+                        setPadding(10, 6, 10, 6)
+                        setOnClickListener {
+                            settingsManager.geminiModel = m
+                            RomHackAssistant.setModel(m)
+                            updateModelRow()
+                            Toast.makeText(context, "Set model to $m", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    val lpM = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                        setMargins(0, 0, if (i < models.size - 1) 6 else 0, 0)
+                    }
+                    modelRow.addView(mBtn, lpM)
+                }
+            }
+            updateModelRow()
+            addView(modelRow)
 
             val saveKeyBtn = Button(context).apply {
                 text = "Save API Key"

@@ -21,5 +21,7 @@ object LibretroHost {
     external fun nativeLoadSaveRam(savePath: String): Boolean
     external fun nativeFlushSaveRam(savePath: String): Boolean
     external fun nativeResetCore()
+    external fun nativeGetTargetFps(): Double
+    external fun nativeGetAudioSampleRate(): Double
     external fun nativeCleanup()
 }
