@@ -97,7 +97,7 @@ class CompanionViewModel(
                     val playerPartyRaw = LibretroHost.nativeReadPartyFromCore(gameId)
                     if (playerPartyRaw != null) {
                         val playerList = playerPartyRaw.filterNotNull().filter { !it.isEmpty && it.isValid }
-                        if (playerList.isNotEmpty() || _playerParty.value.isNotEmpty()) {
+                        if (playerList.isNotEmpty()) {
                             _playerParty.value = playerList
                         }
                     }

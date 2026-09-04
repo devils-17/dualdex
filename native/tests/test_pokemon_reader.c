@@ -323,9 +323,16 @@ static void test_ewram_party_parsing(void) {
         raw.pid = 0x1000 + (i * 24);
         raw.otid = 0x2000;
         raw.level = 20 + (i * 5);
+        raw.max_hp = 50 + (i * 10);
+        raw.current_hp = raw.max_hp;
+        raw.attack = 30 + (i * 5);
+        raw.defense = 30 + (i * 5);
+        raw.speed = 30 + (i * 5);
+        raw.sp_attack = 30 + (i * 5);
+        raw.sp_defense = 30 + (i * 5);
 
         SubstructGrowth g = {.species = (uint16_t)(1 + i)}; // Bulbasaur, Ivysaur, Venusaur
-        SubstructAttacks a = {0};
+        SubstructAttacks a = {.moves = {10, 20, 0, 0}, .pp = {30, 20, 0, 0}};
         SubstructEVs e = {.hp_ev = (uint8_t)(i * 10)};
         SubstructMisc m = {.iv_egg_ability = 31};
 
@@ -353,6 +360,101 @@ static void test_ewram_party_parsing(void) {
     printf(ANSI_GREEN "  [PASS] test_ewram_party_parsing" ANSI_RESET "\n");
 }
 
+static void test_ewram_scan_ignores_box_pokemon_and_finds_real_party(void) {
+    printf("Running test_ewram_scan_ignores_box_pokemon_and_finds_real_party...\n");
+
+    const size_t EWRAM_SIZE = 256 * 1024;
+    uint8_t* ewram = (uint8_t*)calloc(1, EWRAM_SIZE);
+    TEST_ASSERT(ewram != NULL, "Memory allocation for EWRAM failed");
+
+    pokemon_reader_reset();
+
+    // 1. Place an 80-byte Box Pokémon (Numel, species 322) earlier in EWRAM at 0x10000
+    // Box Pokémon do NOT have runtime battle stats (offsets 0x50..0x63 are 0)
+    {
+        RawGbaPokemon box_numel;
+        memset(&box_numel, 0, sizeof(box_numel));
+        box_numel.pid = 0x55443322;
+        box_numel.otid = 0x99887766;
+        // Nickname "NUMEL"
+        uint8_t numel_name[] = {0xC8, 0xCE, 0xC7, 0xBF, 0xC6, 0xFF};
+        memcpy(box_numel.nickname, numel_name, sizeof(numel_name));
+
+        SubstructGrowth g = {.species = 322}; // Numel
+        SubstructAttacks a = {0};
+        SubstructEVs e = {0};
+        SubstructMisc m = {.iv_egg_ability = 31};
+
+        pack_and_encrypt(box_numel.pid, box_numel.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         box_numel.raw_substructures, &box_numel.checksum);
+
+        // Crucially, level and max_hp are 0 for Box Pokemon
+        box_numel.level = 0;
+        box_numel.max_hp = 0;
+        box_numel.current_hp = 0;
+        box_numel.attack = 0;
+        box_numel.defense = 0;
+
+        memcpy(ewram + 0x10000, &box_numel, 80);
+    }
+
+    // 2. Place the player's true 3-mon party at 0x28000 (dynamic offset, e.g. Heart & Soul)
+    // Put gPlayerPartyCount = 3 at 0x27FFC (off - 4)
+    ewram[0x27FFC] = 3;
+
+    for (int i = 0; i < 3; i++) {
+        RawGbaPokemon party_mon;
+        memset(&party_mon, 0, sizeof(party_mon));
+        party_mon.pid = 0x7700 + (i * 24);
+        party_mon.otid = 0x1234;
+        party_mon.level = 25 + (i * 5);
+        party_mon.max_hp = 60 + (i * 12);
+        party_mon.current_hp = party_mon.max_hp;
+        party_mon.attack = 40 + (i * 5);
+        party_mon.defense = 35 + (i * 5);
+        party_mon.speed = 45 + (i * 5);
+        party_mon.sp_attack = 40 + (i * 5);
+        party_mon.sp_defense = 40 + (i * 5);
+
+        SubstructGrowth g = {.species = (uint16_t)(152 + i)}; // Chikorita, Bayleef, Meganium
+        SubstructAttacks a = {.moves = {33, 75, 0, 0}, .pp = {25, 15, 0, 0}}; // Tackle, Razor Leaf
+        SubstructEVs e = {.hp_ev = 10};
+        SubstructMisc m = {.iv_egg_ability = 31};
+
+        pack_and_encrypt(party_mon.pid, party_mon.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         party_mon.raw_substructures, &party_mon.checksum);
+
+        uint8_t* slot = ewram + 0x28000 + (i * sizeof(RawGbaPokemon));
+        memcpy(slot, &party_mon, sizeof(RawGbaPokemon));
+    }
+
+    // 3. Scan EWRAM
+    PartySnapshot snapshot;
+    uint8_t count = pokemon_scan_ewram_for_party(ewram, EWRAM_SIZE, &snapshot);
+
+    TEST_ASSERT(count == 3, "Scanner must find all 3 genuine party members");
+    TEST_ASSERT(snapshot.count == 3, "Snapshot count must be 3");
+    TEST_ASSERT(snapshot.members[0].species == 152, "First member must be Chikorita (152), NOT Box Numel!");
+    TEST_ASSERT(snapshot.members[1].species == 153, "Second member must be Bayleef (153)");
+    TEST_ASSERT(snapshot.members[2].species == 154, "Third member must be Meganium (154)");
+    TEST_ASSERT(snapshot.members[0].level == 25, "First member level must be 25");
+
+    // 4. Test pokemon_read_player_party with mismatched static config offset
+    // It should reject the invalid static offset and fallback to scanning, returning the true party
+    const GameMemoryConfig* emerald_cfg = pokemon_get_game_config(GAME_EMERALD);
+    pokemon_reader_reset();
+    PartySnapshot read_snapshot;
+    uint8_t read_count = pokemon_read_player_party(ewram, EWRAM_SIZE, emerald_cfg, &read_snapshot);
+    TEST_ASSERT(read_count == 3, "pokemon_read_player_party must fallback and find the 3 party members");
+    TEST_ASSERT(read_snapshot.members[0].species == 152, "First member must be Chikorita (152)");
+
+    free(ewram);
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_ewram_scan_ignores_box_pokemon_and_finds_real_party" ANSI_RESET "\n");
+}
+
 int main(void) {
     printf("===================================================\n");
     printf("   DualDex Gen 3 Memory Parser Test Suite\n");
@@ -364,6 +466,7 @@ int main(void) {
     test_checksum_corruption_detection();
     test_shininess_calculation();
     test_ewram_party_parsing();
+    test_ewram_scan_ignores_box_pokemon_and_finds_real_party();
 
     printf("===================================================\n");
     printf("Results: %d Passed, %d Failed\n", g_tests_passed, g_tests_failed);
