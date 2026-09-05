@@ -479,24 +479,78 @@ These should **not delay the initial beta**.
 - [ ] More calculator mechanics for modern ROM hacks.
 - [ ] More emulator cores/systems only if the Pokémon companion concept eventually justifies it.
 
+## Recommended Bug-Fix Order
+
+The static audit produced GitHub issues **#1–#19**. Work through the following order before adding substantial new ROM-hack support. The ordering intentionally handles user-data safety and core ownership first, because several later fixes become safer and cleaner once those foundations exist.
+
+### Tier 1 — Protect Saves and Stabilize the Emulator Core
+
+1. [ ] **#2 — Give every ROM a unique save/state identity.**
+   - This prevents different ROMs or hack versions from sharing SRAM, save states, or cheats.
+2. [ ] **#3 — Make battery-save writes/imports atomic and recoverable.**
+   - Add backups before relying on public testers' real saves.
+3. [ ] **#5 — Serialize libretro mutations on the emulator thread.**
+   - Establish the command queue/core-owner architecture before routing more operations through it.
+4. [ ] **#4 — Make ROM switching a safe transaction.**
+   - Build the switch process on top of #2, #3, and #5 so it can flush, unload, reset, load, and restore safely.
+
+### Tier 2 — Make Live Companion Data Trustworthy
+
+5. [ ] **#1 — Fix battle lifecycle and active-enemy tracking.**
+   - Prefer one coherent battle snapshot and explicit battle state rather than enemy-party heuristics.
+6. [ ] **#7 — Add Verified / Recognized-Unverified / Unsupported ROM states.**
+   - Never parse an unknown ROM using arbitrary FireRed/default offsets.
+7. [ ] **#8 — Make engine/layout profiles authoritative for native memory parsing.**
+   - Do this before adding many more ROM hacks.
+8. [ ] **#9 — Make the damage calculator profile/version aware.**
+   - Stop hard-coding Gen 3 rules for hacks that use modern mechanics.
+9. [ ] **#16 — Clear stale party/location/battle state when the active game becomes invalid or changes.**
+10. [ ] **#11 — Move map/location routing and SaveBlock behavior into engine/layout profiles.**
+
+### Tier 3 — Fix Public-Beta UX and Feature Reliability
+
+11. [ ] **#10 — Fix cached-tab lifecycle bugs in Assistant and Docs.**
+12. [ ] **#14 — Implement the controller shortcuts currently advertised by DualDex.**
+13. [ ] **#6 — Persist direct-ROM URI permissions and recover cleanly from stale URIs.**
+14. [ ] **#12 — Secure Gemini credentials and define explicit Android backup exclusions.**
+15. [ ] **#13 — Remove cross-ROM incorrect fallback guidance from Assistant/Docs.**
+
+### Tier 4 — Cleanup and Regression Prevention
+
+16. [ ] **#15 — Eliminate stale/duplicated `gameId` assumptions across native, Kotlin, tests, and docs.**
+17. [ ] **#17 — Key cheat presets to verified ROM versions instead of display-name heuristics.**
+18. [ ] **#18 — Fix the HomeScreenView coroutine/lifecycle leak.**
+19. [ ] **#19 — Remove duplicate packaged mGBA core binaries.**
+
+### Audit Exit Gate
+
+Before moving from bug fixing back to ROM-hack expansion:
+
+- [ ] Issues #2, #3, #4, #5, #7, and #8 are complete.
+- [ ] Issue #1 has regression coverage for switches, faints, and battle end.
+- [ ] Supported ROMs cannot display live data under an unverified memory layout.
+- [ ] Save corruption/cross-ROM contamination tests pass.
+- [ ] Repeated save/load/switch stress testing produces no core race failures.
+- [ ] At least FireRed, Emerald, and one modern-mechanics hack have calculator golden tests.
+
 ## Suggested Development Order
 
-1. **Save safety and unique ROM IDs**
-2. **Safe ROM switching / core serialization**
-3. **Unsupported-ROM handling**
-4. **Refactor memory profiles before adding many more hacks**
-5. **Finish controller shortcuts**
-6. **Save import wording + cross-emulator validation**
-7. **Diagnostics**
-8. **Documentation cleanup**
-9. **Signing + CI + GitHub release process**
-10. **Privacy/API-key cleanup**
-11. **Finish Unbound + a few other high-value hacks**
-12. **Release free AYN Thor beta**
-13. **Use actual beta feedback to determine priorities**
-14. **Build first-class single-screen layouts**
-15. **Evaluate a Google Play/general-Android release**
-16. **Only then decide whether ads are actually worth adding**
+1. **Complete audit Tier 1: save safety + emulator core ownership (#2, #3, #5, #4).**
+2. **Complete audit Tier 2: trustworthy battle/ROM/profile/calculator state (#1, #7, #8, #9, #16, #11).**
+3. **Complete audit Tier 3 public-beta reliability fixes (#10, #14, #6, #12, #13).**
+4. **Complete audit Tier 4 cleanup/regression work (#15, #17, #18, #19).**
+5. **Finish save-import wording + cross-emulator validation.**
+6. **Add diagnostics and GitHub issue templates.**
+7. **Clean up documentation and supported-version tables.**
+8. **Set up permanent signing, CI, and GitHub release process.**
+9. **Finish privacy policy / Assistant disclosure work.**
+10. **Finish Unbound + a few other high-value hacks only after profile architecture is stable.**
+11. **Run the complete per-ROM beta compatibility matrix.**
+12. **Release free AYN Thor beta.**
+13. **Use actual beta feedback to determine priorities.**
+14. **Build first-class single-screen layouts.**
+15. **Evaluate a Google Play/general-Android release.**
+16. **Only then decide whether ads are actually worth adding.**
 
 ## Beta Definition of Done
 
