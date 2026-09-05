@@ -2,6 +2,102 @@
 
 This checklist tracks work recommended before a wider public beta, followed by longer-term work for broader Android support and possible Play Store distribution.
 
+## Release Readiness Principles
+
+Before working down the individual tasks, keep the following release-level rules in place. The goal for `0.9.0-beta.1` is not to make DualDex feature-complete; it is to make a narrow set of core promises trustworthy enough for other people to use with real save data.
+
+### Scope and Product Focus
+
+- [ ] **Feature-freeze major additions until the beta blockers are complete.**
+  - Do not add new major companion features, broad single-screen work, ads, cloud saves, or speculative emulator features during hardening.
+  - Finish already-active ROM support work only when it does not delay architecture/safety fixes.
+  - Put good new ideas into issues/backlog instead of expanding the beta scope.
+- [ ] Keep the initial beta promise narrow:
+  - Reliable GBA Pokémon emulation on AYN Thor.
+  - Protected/recoverable saves.
+  - Trustworthy live companion data for a small, explicitly verified set of ROM versions.
+- [ ] Treat Assistant and Cheats as optional/experimental if they are not fully verified by release time rather than delaying the core beta.
+- [ ] Avoid unnecessary rewrites during beta hardening.
+  - No full Compose rewrite.
+  - No large dependency modernization project unless required for a blocker.
+  - Prefer targeted architecture fixes that preserve already-working behavior.
+
+### Lock Permanent App Identity Before Distribution
+
+- [ ] Decide whether the current Android application ID/package (`com.dualdex`) is the permanent identity before distributing public builds.
+- [ ] Generate and begin testing with the permanent production signing key before public beta.
+- [ ] Establish release versioning (`0.9.0-beta.1`, `beta.2`, etc.) before the first public APK.
+- [ ] Introduce a persistent storage/settings schema version so future releases can run explicit migrations rather than relying on old files continuing to work by accident.
+- [ ] Create a known-good pre-hardening tag/branch before the deeper save/core/profile refactors so regressions are easy to bisect or revert.
+
+### Make Save Protection a Product Rule
+
+- [ ] Treat preservation of the user's battery save as higher priority than preserving UI state, save states, or convenience features.
+- [ ] Add a simple `Export/Backup All Saves` path before public beta if practical.
+- [ ] Never perform a destructive save/storage migration without retaining the previous data until the new format is confirmed valid.
+- [ ] Test migrations from existing development storage into the new per-ROM identity scheme.
+
+### Release in Rings
+
+Do not go directly from one developer device to a public beta.
+
+1. [ ] Test a release-signed build on the primary development Thor.
+2. [ ] Give the exact build to roughly 3–5 trusted Thor testers.
+3. [ ] Expand to roughly 10–20 testers once installation, updates, saves, and device behavior look stable.
+4. [ ] Only then publish the wider GitHub beta.
+
+- [ ] Collect device/Android/build diagnostics from each testing ring.
+- [ ] Use feedback from these rings to fix release blockers rather than adding features.
+
+### Test Upgrades, Not Only Fresh Installs
+
+For every beta candidate:
+
+- [ ] Test a clean install.
+- [ ] Test installing the new signed APK over the previous beta.
+- [ ] Verify ROM folder permissions survive the update.
+- [ ] Verify Continue/last-ROM behavior survives the update.
+- [ ] Verify battery saves survive and load correctly.
+- [ ] Verify settings survive or migrate correctly.
+- [ ] Verify save states are either compatible or clearly identified as incompatible.
+- [ ] Test the transition from current debug/development builds to the permanent release-signed build and document any required save export/import step.
+
+### Hardware Soak Testing
+
+Before promoting a release candidate:
+
+- [ ] Run at least one extended real-play session on AYN Thor rather than only short smoke tests.
+- [ ] Exercise normal speed and fast-forward.
+- [ ] Exercise save/load state repeatedly.
+- [ ] Suspend/resume the app multiple times.
+- [ ] Switch ROMs repeatedly.
+- [ ] Use the companion tabs and calculator throughout the session.
+- [ ] Watch for memory growth, audio drift, thermal issues, battery drain, frame pacing problems, stale companion data, and crashes that only appear after extended play.
+
+### Make Compatibility Claims Conservative
+
+- [ ] Publish exact verified ROM versions/hashes instead of claiming generic support based only on a hack name.
+- [ ] Maintain a compatibility matrix per verified ROM/version, for example:
+  - Party reading
+  - Battle/enemy tracking
+  - Damage calculator
+  - Type chart
+  - Map/location
+  - Battery saves/import/export
+  - Cheats, if offered
+- [ ] Label incomplete support as experimental/unverified instead of presenting approximate data confidently.
+- [ ] Rewrite the release-facing README around what is actually verified at release time: installation, screenshots, exact compatibility, save backup, known limitations, bug reporting, privacy, and non-affiliation.
+
+### Release Candidate Discipline
+
+- [ ] Cut a release candidate such as `0.9.0-beta.1-rc1` once the checklist is substantially complete.
+- [ ] Test the **exact release-candidate APK** that will become the beta.
+- [ ] Do not add unrelated polish/features to an RC.
+- [ ] If a blocker is found, fix only the blocker and cut `rc2`/later rather than silently changing the tested artifact.
+- [ ] Promote the same tested commit/artifact lineage to `0.9.0-beta.1` once the RC passes the tester rings and soak tests.
+
+> **Target beta promise:** DualDex runs GBA Pokémon games reliably on the AYN Thor, protects the user's saves, and provides trustworthy live companion information for a small documented list of exact ROM versions.
+
 ## Phase 1 — Release Blockers
 
 ### Save Safety and ROM Switching
