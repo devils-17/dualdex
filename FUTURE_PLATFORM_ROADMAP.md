@@ -2,601 +2,564 @@
 
 > **Long-term roadmap only. This document is explicitly not part of the AYN Thor `0.9.0-beta.1` release scope.**
 >
-> The current GBA beta should be stabilized, released, and validated with real users before work begins here.
+> The current GBA beta should be stabilized, released, and validated with real users before work begins here. Nothing in this document should delay the initial beta.
 
 ## Vision
 
-DualDex should eventually become more than a GBA emulator with a Pokémon companion. The longer-term architecture can support multiple emulator cores and console families while preserving the thing that makes DualDex different: **game-aware, real-time companion tools that run alongside the game**.
+DualDex should eventually become more than a GBA emulator with a Pokémon companion. The long-term goal is a **multi-system Pokémon emulation companion platform** that can support the main-series games and ROM hacks/mods from Generation 1 through Generation 9 while preserving the thing that makes DualDex different:
 
-Nintendo DS is the most logical first platform expansion because:
+> **the game stays fully playable, while DualDex adds trustworthy live party/battle data, version-aware damage calculations, trainer/encounter information, and searchable documentation around it.**
 
-- the AYN Thor is already physically suited to DS emulation,
-- Pokémon has a large DS-era ROM-hack ecosystem,
-- the second screen creates interesting companion-layout opportunities rather than merely duplicating a normal DS emulator,
-- Gen 4 already has mature reverse-engineering resources and community calculator/documentation tooling,
-- and Pokémon Platinum Kaizo is a strong first target because its difficulty makes live calculations, trainer information, encounter data, and documentation unusually valuable.
+The important architectural lesson is that “support every generation” should **not** mean forcing every console into the same emulator integration model.
 
-The long-term goal is therefore **not simply to add a DS emulator**. The goal is to evolve DualDex into a **multi-system libretro frontend plus game-integration platform**, with Nintendo DS / Platinum Kaizo as the first new system and game integration.
-
----
-
-# Feasibility Summary
-
-| Capability | Feasibility | Notes |
-|---|---|---|
-| Nintendo DS emulation on AYN Thor | **High** | Maintained libretro DS cores support Android arm64. Thor Base/Pro/Max hardware is Snapdragon 8 Gen 2; Lite uses Snapdragon 865, so both tiers should be benchmarked. |
-| Two DS screens across the Thor's two physical displays | **High** | DS libretro cores expose configurable screen layouts. A composite framebuffer can be cropped into separate top/bottom textures if necessary. |
-| DS touchscreen input | **High** | Libretro supports pointer/touch-style input; the bottom physical display can map to DS stylus coordinates. |
-| Real-time Gen 4 party data | **Medium-High** | Gen 4 Pokémon structures are well documented, and existing Platinum/Platinum Kaizo Lua tools already read live state. Exact RAM mapping still needs implementation and version validation. |
-| Real-time battle/opponent tracking | **Medium** | Feasible, but more complex than party parsing because Platinum uses dynamic overlays and battle structures. Must be based on exact game/version layouts and coherent battle snapshots. |
-| Platinum Kaizo calculator/docs integration | **High** | The hack has official/community documentation, calculators, trainer data, and live sync tooling. ROM-driven data extraction is also feasible. |
-| Generic multi-system architecture | **High** | DualDex already uses libretro, but the current frontend has several GBA-specific assumptions that need to be generalized. |
-| Platinum Kaizo on melonDS specifically | **Unverified / risk** | Platinum Kaizo's current FAQ recommends DeSmuME and warns that melonDS-core emulators have save problems. This must be tested against the exact current melonDS DS core/version rather than assumed to work. |
-| Bundling a DS core under the current licensing model | **Requires review** | DeSmuME is GPLv2; melonDS DS is GPLv3+. Do not assume loading a core dynamically removes copyleft/distribution obligations. |
-
-**Overall verdict:** technically feasible and a good long-term fit for DualDex, but the correct first step is a core/platform abstraction and compatibility prototype—not immediately writing a Platinum Kaizo parser.
-
----
-
-# Research Findings
-
-## 1. DS emulator core options
-
-### melonDS DS
-
-The current libretro `melonDS DS` core is the technically attractive long-term option.
-
-Relevant capabilities include:
-
-- Android arm64 support,
-- multiple screen layouts and runtime layout switching,
-- touch / virtual cursor input,
-- hardware rendering support,
-- save files and save states,
-- memory monitoring support,
-- optional dynarec capability,
-- DS and DSi support,
-- microphone and other modern libretro interfaces.
-
-However, **Platinum Kaizo's current official FAQ specifically recommends DeSmuME and states that emulators using the melonDS core cannot save correctly for the hack**. That warning should be treated as a real compatibility blocker until proven otherwise on the exact `melonDS DS` build DualDex would ship.
-
-### DeSmuME
-
-DeSmuME is therefore the safest first compatibility candidate for Platinum Kaizo itself.
-
-Advantages:
-
-- directly recommended by the Platinum Kaizo project,
-- mature Platinum compatibility,
-- libretro support for screen layouts, memory monitoring, touch input, saves, and states,
-- existing Platinum Kaizo community tools already target DeSmuME's Lua environment.
-
-Potential drawback:
-
-- libretro documentation notes that DeSmuME JIT availability is limited on Android, which could make it less efficient than melonDS DS.
-
-### Recommended core strategy
-
-Do **not** choose one core permanently before prototyping.
-
-Build the architecture so that a Nintendo DS game integration is independent of the selected core, then benchmark:
-
-1. **DeSmuME** — compatibility-first Platinum Kaizo target.
-2. **melonDS DS** — preferred modern Android core if Platinum Kaizo save behavior can be validated/fixed upstream or shown not to affect the current core/version.
-
-The same Platinum/Gen 4 companion adapter should ideally work on both once they expose a normalized DS memory map.
-
----
-
-## 2. Platinum / Gen 4 live-memory reading is practical
-
-Generation 4 Pokémon data is well understood. Party Pokémon use the documented Gen 4 encrypted/shuffled Pokémon format with extra party fields; public reverse-engineering references describe the 136-byte boxed and 236-byte party structures.
-
-More importantly, the feasibility is already demonstrated by the Platinum community:
-
-- Platinum Kaizo has an official Lua sync tool for DeSmuME that can automatically import live Pokémon into its calculator.
-- Other Platinum Lua tooling performs battle tracking, party/box export, and calculator synchronization.
-- The `pret/pokeplatinum` decompilation exposes readable Platinum battle-system and party structures and can be used as a reference for understanding vanilla engine behavior.
-
-This means DualDex's Gen 4 work is primarily an **integration and version-mapping problem**, not a question of whether the data can be read at all.
-
-### Important difference from GBA
-
-Nintendo DS memory is more complicated than the current GBA EWRAM model:
-
-- multiple CPU/memory regions exist,
-- Platinum uses dynamically loaded overlays,
-- battle code/data may live in overlay-specific regions,
-- hack revisions can change overlay content and addresses,
-- absolute RAM addresses therefore should not become another set of unversioned constants.
-
-The DS implementation should build on the planned engine/layout-profile architecture from the GBA beta rather than recreating hard-coded per-game offsets.
-
----
-
-## 3. Static ROM data can power docs and calculators
-
-DualDex does not need to obtain every piece of game information through live RAM.
-
-For Nintendo DS Pokémon games, much of the useful companion data can be extracted from the user-supplied `.nds` image:
-
-- species/base stats,
-- types,
-- abilities,
-- moves and move properties,
-- learnsets,
-- trainer rosters,
-- encounter tables,
-- items/TMs,
-- other ROM-hack-specific static data.
-
-There is already a useful proof of concept: `hzla/ddex` can load Gen 4 `.nds` ROM hacks and export local calculator/dex data, including permanently hosted profiles for several DS hacks and Platinum Kaizo.
-
-### Long-term recommendation: `GameDataPack`
-
-Create a normalized internal data layer:
+A scalable design should support several emulator/memory backends behind one companion API:
 
 ```text
-GameDataPack
-- game/version identity
-- species
-- moves
-- abilities
-- items
-- trainer sets
-- encounters
-- level caps
-- mechanics overrides
-- documentation entries
-- calculator rules
+                 DualDex Companion UI
+                         │
+                  GameIntegration
+                         │
+              Normalized Pokémon Snapshots
+                         │
+                    MemoryTransport
+          ┌──────────────┼──────────────┐
+          │              │              │
+   Libretro RAM      Emulator RPC    GDB / Debugger
+  GB/GBC/GBA/NDS        3DS           Switch
 ```
 
-A data pack could be produced from:
+Nintendo DS / Platinum Kaizo remains the recommended first expansion because it exercises multi-screen rendering, touch input, a new Pokémon data format, and a new emulator core without jumping immediately to the much larger 3DS/Switch integration problem.
 
-1. **local extraction from the user's ROM** where technically practical, or
-2. **explicitly licensed community data packs** bundled/downloaded separately.
+---
 
-Prefer local extraction where possible. It automatically follows the exact ROM build and avoids relying on stale third-party spreadsheets.
+# Support Model: Do Not Promise “Every Hack Just Works”
 
-Do not redistribute ROMs, BIOS/firmware, or copyrighted game assets. Community datasets/code should only be reused after checking their licenses/permission.
+The end goal can be broad compatibility without pretending arbitrary modified games are safe to parse automatically.
+
+DualDex should expose explicit integration levels:
+
+| Level | Meaning | Features |
+|---|---|---|
+| **0 — Emulator Only** | System/core can run the game, but DualDex does not understand it. | Emulation, saves, states, controls. |
+| **1 — Static Companion** | DualDex can identify/extract game data but does not trust live memory. | Dex, moves, trainers, encounters, searchable docs, manual calculator. |
+| **2 — Live Player State** | Exact game/version layout verified. | Party, levels, moves, HP/status, location where available. |
+| **3 — Live Battle Integration** | Battle structures/lifecycle verified. | Active battlers, opponent, field state, auto-filled calculator. |
+| **4 — Enhanced Controls** | Exact UI state/input mappings verified. | Optional context-aware battle controls/macros using normal emulator input. |
+
+A new hack should be allowed to fall back safely from Level 3 to Level 1 rather than displaying plausible-but-wrong live information.
+
+---
+
+# Generation / Platform Feasibility Matrix
+
+| Era | Main platforms | Example games | Emulator strategy | Live companion feasibility | Overall |
+|---|---|---|---|---|---|
+| **Gen 1** | GB | Red / Blue / Yellow | Existing mGBA core or GB-specific libretro core | Straightforward RAM model; excellent reverse-engineering resources | **Very High** |
+| **Gen 2** | GB / GBC | Gold / Silver / Crystal | Existing mGBA core or GB/GBC core | Straightforward RAM banking; excellent disassemblies | **Very High** |
+| **Gen 3** | GBA | RSE / FRLG + hacks | Existing mGBA integration | Already DualDex’s current platform | **Current** |
+| **Gen 4** | NDS | DPPt / HGSS + hacks | DeSmuME or melonDS DS libretro | Well researched; Platinum decomp + existing live sync tooling | **High** |
+| **Gen 5** | NDS | BW / BW2 + hacks | Reuse NDS platform layer | Same console foundation; separate data/runtime parser | **High** |
+| **Gen 6** | 3DS | XY / ORAS + hacks/randomizers | Azahar integration or bridge | Guest-memory RPC exists; static data tooling is mature | **Medium-High** |
+| **Gen 7** | 3DS | SM / USUM | Reuse 3DS platform layer | Same emulator family, new game layouts/mechanics | **Medium-High** |
+| **Gen 7-era** | Switch | Let’s Go Pikachu/Eevee | Switch emulator integration | Static extraction is mature; runtime integration is harder | **Medium** |
+| **Gen 8** | Switch | Sword/Shield, BDSP, Legends: Arceus | Switch emulator integration | Multiple distinct engines; debugger access is plausible | **Medium** |
+| **Gen 9** | Switch | Scarlet/Violet | Switch emulator integration | Static data extraction exists; runtime/version complexity is high | **Medium** |
+
+The hardest part of later generations is **not the calculator itself**. The official Smogon damage-calculator library already supports all generations and exposes an adaptable generation/data interface. The hard parts are emulator integration, exact build identity, live-memory mapping, and hack/mod-specific mechanics.
+
+---
+
+# Platform Research Findings
+
+## 1. Game Boy / Game Boy Color — Generations 1 and 2
+
+This is probably the cheapest future expansion after the GBA beta.
+
+The current mGBA libretro core already supports `.gb`, `.gbc`, and `.gba`, along with saves, states and memory monitoring. That means DualDex may not need another emulator core at all for Gen 1/2.
+
+Alternative GB/GBC cores such as Gambatte, SameBoy and Gearboy exist, but using mGBA first would minimize core-management and licensing complexity because DualDex already ships it.
+
+### Why Gen 1/2 are attractive
+
+- Small/simple memory maps compared with later systems.
+- Mature Pokémon disassemblies from `pret`.
+- Huge ROM-hack ecosystems.
+- Existing DualDex single-screen + companion layout already fits perfectly.
+- The same `GameDataPack`, `PlayerSnapshot`, and calculator abstractions can be validated on a much simpler system before tackling 3DS/Switch.
+
+### Recommended approach
+
+- [ ] Add `GB` and `GBC` system descriptors to the generalized mGBA session.
+- [ ] Implement Gen 1 Pokémon/player/battle parser against verified vanilla Red/Blue/Yellow builds.
+- [ ] Implement Gen 2 parser against verified Crystal first, then Gold/Silver.
+- [ ] Generate static data from ROM/disassembly-compatible formats where practical.
+- [ ] Add exact-version profiles for popular hacks rather than assuming all hacks share vanilla layouts.
+
+Potential reverse-engineering references include `pret/pokered` and `pret/pokecrystal`.
+
+**Recommendation:** Gen 1/2 should become the first “new generations” after the generic platform work, even if DS remains the first *new console core*.
+
+---
+
+## 2. Game Boy Advance — Generation 3
+
+This remains the current production foundation.
+
+The GBA beta work should intentionally produce reusable pieces for every later platform:
+
+- stable content identity,
+- safe save storage,
+- emulator-thread ownership,
+- versioned engine/layout profiles,
+- compatibility states,
+- generic snapshots,
+- `GameDataPack`,
+- calculator-rule abstraction.
+
+Do not throw away the GBA architecture when multi-system work starts. Refactor it until GBA becomes the first implementation of the generic interfaces.
+
+---
+
+## 3. Nintendo DS — Generations 4 and 5
+
+Nintendo DS is the most logical first new console platform.
+
+### Core options
+
+#### melonDS DS
+
+The maintained `melonDS DS` libretro core is technically attractive because it supports Android arm64, multiple screen layouts, touch/virtual cursor input, hardware rendering, saves/states, memory monitoring and modern libretro interfaces.
+
+However, Platinum Kaizo’s current documentation recommends DeSmuME and warns about save behavior with melonDS-core emulators. That should be treated as a compatibility gate for that exact hack until tested on the current core/version.
+
+#### DeSmuME
+
+DeSmuME is the compatibility-first Platinum Kaizo candidate because the hack’s existing live-sync tooling targets it and the project currently recommends it.
+
+The downside is that Android performance/JIT behavior may be less attractive than modern melonDS builds.
+
+### Gen 4
+
+Gen 4 is especially promising because:
+
+- `pret/pokeplatinum` provides a readable Platinum decompilation,
+- Gen 4 Pokémon structures are well documented,
+- Platinum Kaizo already has live DeSmuME-to-calculator synchronization,
+- tools such as DSPRE and `hzla/ddex` demonstrate static extraction/editing of Gen 4 data.
+
+### Gen 5
+
+Once the DS platform layer is stable, Black/White and Black 2/White 2 should be a **new game integration**, not a new emulator project.
+
+Useful research/tooling already exists:
+
+- Pokémon Black decompilation work,
+- Gen 5 ROM editors that understand trainers, encounters, moves, species data and scripts,
+- mature save/Pokémon structure research in the wider PKHeX ecosystem.
+
+Gen 5 will still need its own runtime parser and battle-state mapping, but it should reuse:
+
+- DS rendering,
+- touch/controller handling,
+- DS memory transport,
+- save/state infrastructure,
+- ROM identity,
+- static NDS archive readers.
+
+**Recommendation:** after Platinum Kaizo, Gen 5 is the highest-value next platform target because the expensive DS work is already paid for.
+
+---
+
+## 4. Nintendo 3DS — Generations 6 and 7
+
+3DS support requires a different emulator-integration strategy.
+
+### Emulator direction: Azahar
+
+Azahar is the active open-source 3DS emulator that emerged from the post-Citra ecosystem and currently provides Android builds. Its published Android requirements are comfortably below modern Thor-class hardware on paper, although real Pokémon performance still needs device testing.
+
+The particularly important finding for DualDex is that Azahar includes a scripting/RPC server whose configuration explicitly says it allows **remote guest-memory access**. Azahar also retains debugger/GDB infrastructure.
+
+That makes a companion bridge plausible without requiring a libretro memory API.
+
+### Why not simply use the legacy Citra libretro core?
+
+A Citra libretro core exists, but current Libretro documentation lists memory monitoring as unsupported. That makes it much less attractive for DualDex’s defining live-companion feature.
+
+A future prototype should compare:
+
+1. **Azahar RPC bridge** — DualDex reads verified guest-memory ranges through a localhost/debug transport.
+2. **Azahar source integration** — deeper integration/fork if dual-display rendering and lifecycle require it.
+3. **Legacy Citra libretro** — emulator-only fallback/prototype, not the preferred live-data architecture unless memory exposure is added.
+
+### Static game data
+
+`pk3DS` supports the 3DS Pokémon titles and already understands data such as:
+
+- trainers,
+- wild encounters,
+- personal/base stats,
+- moves,
+- learnsets,
+- evolutions,
+- marts and related tables.
+
+That is strong evidence that a 3DS `GameDataPackExtractor` is practical even before live memory works.
+
+### 3DS UX on Thor
+
+A 3DS integration can reuse the DS multi-screen renderer concept:
+
+- Thor top display: 3DS top screen, optionally with a companion sidecar.
+- Thor bottom display: 3DS touch screen by default.
+- Controller shortcut: instantly toggle the physical bottom display between the real 3DS bottom screen and DualDex companion tabs.
+- Initially render one stereoscopic eye only; stereoscopic 3D is not a DualDex requirement.
+
+### Recommended 3DS order
+
+- [ ] Vanilla Pokémon X/Y emulator prototype.
+- [ ] Reliable save/update handling.
+- [ ] RPC/debug memory transport prototype.
+- [ ] Gen 6 static data extraction.
+- [ ] Gen 6 party snapshot.
+- [ ] Gen 6 battle snapshot/calculator.
+- [ ] ORAS profile.
+- [ ] Gen 7 integration for Sun/Moon, then Ultra Sun/Ultra Moon.
+- [ ] Only then begin validating ROM hacks/randomizers/modded builds.
+
+---
+
+## 5. Nintendo Switch — Generations 8 and 9
+
+Switch is the largest technical jump and should be considered a separate long-term program rather than “Phase 2 of DS support.”
+
+### Emulator landscape
+
+There is no mature Switch libretro path comparable to mGBA/DS.
+
+Active open-source Switch emulator projects such as Eden provide Android/ARM64 builds. Eden’s current debugging documentation exposes a guest GDB stub and memory mappings, which creates a plausible live-memory transport for DualDex.
+
+That suggests the first Switch experiment should be a **debugger/RPC companion bridge**, not immediately embedding an entire Switch emulator into DualDex.
+
+Possible long-term models:
+
+```text
+A. ExternalEmulatorBridge
+DualDex Companion <-> localhost GDB/RPC <-> Switch emulator
+
+B. IntegratedNativeEmulator
+DualDex owns/forks emulator frontend and calls emulator core directly
+
+C. Companion-only mode
+User runs supported emulator; DualDex provides static docs/calc if live bridge is unavailable
+```
+
+Model A is the lowest-risk research path. Model B provides the best eventual Thor UX but carries the most engineering and licensing burden.
+
+### Static data is much more feasible than full live integration
+
+`pkNX` already demonstrates structured extraction/editing for Switch Pokémon titles including:
+
+- Let’s Go Pikachu/Eevee,
+- Sword/Shield,
+- Legends: Arceus,
+- Scarlet/Violet data dumping.
+
+This strongly supports a Switch `GameDataPack` pipeline for species, moves, encounters, trainers and other game data.
+
+### Switch should not be treated as one Pokémon engine
+
+At minimum, expect separate integrations for:
+
+```text
+LetsGoIntegration
+SwordShieldIntegration
+BDSPIntegration
+LegendsArceusIntegration
+ScarletVioletIntegration
+```
+
+These titles differ far more internally than FireRed-based ROM hacks do.
+
+BDSP in particular should be treated as its own engine family rather than “Sword/Shield with different data.” Legends: Arceus also needs game-specific battle/calculator concepts rather than assuming standard main-series battle flow.
+
+### Switch identity must include updates and mods
+
+A single cartridge/dump hash is no longer enough.
+
+Recommended identity metadata:
+
+```text
+ModernGameIdentity
+- systemId
+- titleId / programId
+- base-content identity
+- executable/build identity
+- installed update version
+- relevant DLC set
+- mod-pack fingerprint
+- integration profile version
+```
+
+A Scarlet/Violet mod running against one update must never silently inherit memory offsets from another update.
+
+### Thor UX advantage
+
+Ironically, Switch may eventually produce the cleanest DualDex layout:
+
+- **Top physical display:** full 16:9 Switch game.
+- **Bottom physical display:** full-time DualDex companion.
+
+Unlike DS/3DS, there is no original second game screen competing with the companion for space.
+
+Potential bottom-screen tabs:
+
+- Battle / Calc
+- Party
+- Opponent
+- Team / Trainer lookup
+- Encounters
+- Docs
+- Raid information where supported
+
+This is an excellent end-state UX even though the emulator integration is substantially harder.
+
+---
+
+# Cross-Generation Calculator Strategy
+
+DualDex should stop thinking of the calculator as “the Gen 3 calculator.”
+
+The upstream `@smogon/calc` project is designed for all generations and supports an adaptable data layer. Long term, DualDex should expose:
+
+```text
+CalculatorEngine
+  + GenerationRules
+  + GameDataPack
+  + GameMechanicsOverrides
+  + BattleSnapshot
+```
+
+Examples of profile-specific rules include:
+
+- Gen 1 special/stat behavior,
+- Gen 2 mechanics,
+- pre/post physical-special split,
+- Fairy type availability,
+- Mega Evolution,
+- Z-Moves,
+- Dynamax/Gigantamax,
+- Terastallization,
+- hack-specific type charts,
+- hack-specific moves/abilities/items,
+- Legends-specific battle rules.
+
+The calculator should be generation-aware by default and hack-aware through explicit overrides/data rather than edits to one global bundle.
 
 ---
 
 # Proposed Multi-System Architecture
 
-The current architecture treats mGBA/GBA as the system. Before adding DS, separate the following concepts.
+## 1. Emulator session abstraction
 
-## 1. Generic emulator core session
-
-Replace mGBA-specific assumptions with a generic core interface.
+The current mGBA host should become one implementation of a wider session API.
 
 ```text
-EmulatorCoreSession
-- coreId
+EmulatorSession
+- sessionId
 - systemId
-- loadCore()
+- emulatorId
 - loadGame()
 - unloadGame()
-- runFrame()
-- reset()
+- run/pause/reset()
 - saveState()/loadState()
-- saveRam()
-- coreOptions
-- videoInfo
+- saveData()
+- videoSurfaces
 - audioInfo
-- memoryRegions
 - inputCapabilities
+- memoryTransport
 ```
 
-The implementation can still use libretro internally.
+Possible implementations:
 
-### Libretro frontend capabilities that need to be added/generalized
+```text
+LibretroEmulatorSession   // mGBA, DeSmuME, melonDS DS
+RpcEmulatorSession        // Azahar bridge
+GdbEmulatorSession        // Switch emulator bridge
+NativeEmulatorSession     // future deeper 3DS/Switch integration
+```
 
-The current frontend is intentionally minimal and GBA-oriented. DS support will require fuller handling of:
-
-- dynamic framebuffer geometry instead of GBA-sized assumptions,
-- libretro core options / variables,
-- system/save/state directories,
-- `RETRO_ENVIRONMENT_SET_MEMORY_MAPS`,
-- hardware-render context negotiation if used,
-- pointer/touch input,
-- potentially microphone input,
-- runtime geometry/layout changes,
-- more general memory-region discovery,
-- per-core save extensions and behavior.
-
-The emulator-thread command queue planned for the GBA beta should remain the owner of every core mutation.
+The companion layer should not care which one is active.
 
 ---
 
-## 2. Console/system adapter
+## 2. Memory transport abstraction
+
+This is the key addition needed for Gen 1–9 scalability.
+
+```text
+MemoryTransport
+- listRegions()
+- read(region/address, length)
+- readScatter(requests)
+- resolveModule(name/id)      // optional
+- getBuildIdentity()
+- capabilities
+```
+
+Implementations:
+
+```text
+LibretroMemoryTransport
+- retro_get_memory_data()
+- RETRO_ENVIRONMENT_SET_MEMORY_MAPS
+
+RpcMemoryTransport
+- local emulator scripting/RPC service
+
+GdbRemoteMemoryTransport
+- GDB remote protocol guest-memory reads
+
+NativeMemoryTransport
+- direct emulator-core API when integrated in-process
+```
+
+Parsers should never know whether bytes came from mGBA, Azahar or Eden.
+
+### Security rule
+
+RPC/GDB bridges should bind to localhost only by default and must not expose write access to the network. Companion functionality should be read-only unless a narrowly defined feature explicitly requires normal emulator input.
+
+---
+
+## 3. Console adapter
 
 ```text
 ConsoleAdapter
-- systemId: GBA | NDS | ...
-- supportedCoreIds
-- videoLayoutCapabilities
-- inputMapping
-- memoryRegionNormalization
+- systemId
+- supportedEmulators
+- video-layout capabilities
+- input mapping
+- touch capabilities
 - save conventions
-```
-
-For Nintendo DS this adapter should normalize concepts such as:
-
-```text
-NDS_MAIN_RAM
-NDS_ARM7_RAM
-NDS_VRAM / other regions if ever needed
-```
-
-Game parsers should request normalized regions rather than depend directly on emulator-core-specific pointers.
-
----
-
-## 3. Game integration adapter
-
-```text
-GameIntegration
-- profile/version detector
-- runtime parser
-- BattleSnapshot provider
-- PlayerSnapshot provider
-- GameDataPack provider
-- calculator rules
-- documentation provider
-- optional UI actions/macros
+- normalized memory regions
 ```
 
 Examples:
 
 ```text
-Gen3PokemonIntegration
-PlatinumGen4Integration
-PlatinumKaizoIntegration
+GameBoyAdapter
+GameBoyAdvanceAdapter
+NintendoDSAdapter
+Nintendo3DSAdapter
+NintendoSwitchAdapter
 ```
-
-A ROM hack should extend/version a shared engine integration rather than create a totally separate emulator path.
 
 ---
 
-## 4. Core-independent snapshots
+## 4. Game integration adapter
 
-Companion UI should eventually consume generic data models:
+```text
+GameIntegration
+- compatibility detector
+- runtime parser
+- PlayerSnapshot provider
+- BattleSnapshot provider
+- GameDataPack provider
+- CalculatorRules
+- documentation provider
+- optional verified UI actions
+```
+
+Examples:
+
+```text
+Gen1PokemonIntegration
+Gen2PokemonIntegration
+Gen3PokemonIntegration
+PlatinumGen4Integration
+Gen5PokemonIntegration
+Gen6PokemonIntegration
+Gen7PokemonIntegration
+SwordShieldIntegration
+ScarletVioletIntegration
+```
+
+ROM hacks/mods extend a known engine/version profile where possible instead of becoming separate emulator code paths.
+
+---
+
+## 5. Core-independent snapshots
 
 ```text
 PlayerSnapshot
 - party
-- inventory summary (optional)
 - location
+- inventory summary (optional)
 
 BattleSnapshot
 - isInBattle
-- player battlers
-- enemy battlers
+- battleFormat
+- playerBattlers
+- enemyBattlers
 - active party indexes
 - HP/status/stat stages
-- weather/field state
+- weather/terrain/field state
 - trainer identity if known
+- special mechanic state (Mega/Z/Dynamax/Tera/etc.)
 
 PokemonSnapshot
 - species/form
 - level
+- current/max HP
 - stats
-- IVs/EVs where applicable
+- IVs/EVs/DVs where applicable
 - moves/PP
 - item
 - ability
 - status
 ```
 
-The Party and Calculator screens should not care whether those snapshots came from GBA mGBA memory or DS DeSmuME memory.
+The Party and Calculator screens should consume these objects without knowing the console generation.
 
 ---
 
-# Nintendo DS Display / UX Concept
+## 6. `GameDataPack`
 
-DS support should not simply imitate a stock two-screen emulator. The Thor has enough physical screen space to preserve the original game while still showing DualDex information.
-
-## Mode A — Native DS + Companion Sidecar
-
-**Top physical display (1920×1080):**
-
-- Render the DS top screen at a full-height 4:3 ratio.
-- A 1080px-tall 4:3 DS viewport is approximately **1440×1080**, leaving about **480 horizontal pixels** unused on the Thor's 1920px-wide top display.
-- Use that otherwise-empty side area for a compact live companion sidebar.
-
-Possible sidebar content:
-
-- active opponent,
-- HP/status,
-- speed comparison,
-- selected move damage range,
-- weaknesses/resistances,
-- next trainer/battle notes,
-- small context-sensitive documentation hints.
-
-This may be the most valuable DS-specific DualDex UX idea: **use the pillarbox space instead of shrinking or obscuring the actual DS game.**
-
-**Bottom physical display (1240×1080):**
-
-- Render the DS touch screen at the largest correct 4:3 size (approximately 1240×930),
-- use the remaining strip for DualDex mode/navigation controls,
-- map physical touch coordinates to the 256×192 DS stylus coordinate space.
-
----
-
-## Mode B — Full Original DS
-
-- Top display: DS top screen only.
-- Bottom display: DS touch screen only.
-- Companion UI hidden.
-
-This should always be available when the user wants a completely traditional DS experience.
-
----
-
-## Mode C — Companion Bottom Screen
-
-- Top physical display continues showing the DS top screen plus optional sidecar.
-- Bottom physical display switches from the emulated DS touchscreen to DualDex tabs:
-  - Battle / Calc
-  - Party
-  - Docs
-  - Trainers
-  - Encounters
-  - Planner
-
-The DS bottom screen can be:
-
-- hidden until toggled back,
-- shown in a small picture-in-picture preview,
-- or temporarily summoned with a controller shortcut.
-
-A quick-toggle action is essential because many DS games require touchscreen interaction outside battle as well.
-
----
-
-## Mode D — Battle Control Mode (advanced)
-
-This is a later enhancement, not an initial DS requirement.
-
-When DualDex has positively identified that Platinum is on the battle command/move screen, the bottom physical screen could present a custom move-selection interface showing richer information than the original DS UI:
+Static game knowledge belongs in a normalized data layer:
 
 ```text
-Thunderbolt
-90 BP · Special · Electric
-63–75% vs current target
-[SELECT]
+GameDataPack
+- exact game/version identity
+- generation
+- species/forms
+- moves
+- abilities
+- items
+- type chart
+- evolutions
+- learnsets
+- trainer sets
+- encounters
+- shops/items/TMs where available
+- level caps / progression metadata
+- mechanics overrides
+- documentation index
 ```
 
-Selecting the move would **send normal emulated DS stylus/button input** to the game's corresponding UI coordinate rather than modify game memory directly.
+Sources, in preferred order:
 
-Important safety/reliability rule:
+1. **Local extraction from the user’s game dump/mod installation.**
+2. **Declarative profile maintained by DualDex.**
+3. **Explicitly licensed community data pack.**
 
-- only enable profile-specific touch macros when the current game/UI state has been verified,
-- never blindly send a touch coordinate because DualDex merely thinks the player is in battle,
-- always keep a one-button path back to the real DS touchscreen.
-
-This could later extend to battle actions such as Fight / Pokémon / Bag / Run, but should remain optional and profile-specific.
+Local extraction is ideal because it can follow the exact modified build and reduces stale spreadsheet problems.
 
 ---
 
-# Platinum Kaizo Integration Plan
+## 7. Game identity model
 
-## Phase 0 — Do nothing until the GBA beta is stable
-
-Prerequisites:
-
-- GBA `0.9.x` beta is in users' hands,
-- save identity/storage schema is stable,
-- emulator-core thread ownership is stable,
-- engine/layout profiles are authoritative,
-- the UI has been refactored enough that console-specific rendering is not baked into every screen.
-
-Do not let this roadmap delay the GBA beta.
-
----
-
-## Phase 1 — Multi-core frontend refactor
-
-Goal: boot the existing GBA core through a generalized frontend without changing user-visible behavior.
-
-Tasks:
-
-- [ ] Introduce `EmulatorCoreSession` / core descriptor abstraction.
-- [ ] Remove GBA framebuffer-size assumptions.
-- [ ] Generalize audio timing/sample-rate handling.
-- [ ] Implement core options/variables.
-- [ ] Implement system/save/state directories.
-- [ ] Implement libretro memory-map capture.
-- [ ] Add pointer/touch input capability.
-- [ ] Preserve emulator-thread command ownership.
-- [ ] Keep mGBA as the regression test for the generalized host.
-
-Success criterion: current GBA functionality behaves identically through the generic layer.
-
----
-
-## Phase 2 — Nintendo DS core spike
-
-Goal: prove basic DS emulation on real Thor hardware before writing Pokémon integration.
-
-Test **vanilla Pokémon Platinum** first.
-
-Prototype both:
-
-- DeSmuME libretro,
-- melonDS DS libretro.
-
-Test:
-
-- [ ] boot/reboot,
-- [ ] battery save + restore,
-- [ ] save states,
-- [ ] audio,
-- [ ] full-speed gameplay,
-- [ ] frame pacing,
-- [ ] suspend/resume,
-- [ ] touch input,
-- [ ] controller input,
-- [ ] both DS screens,
-- [ ] screen-layout changes,
-- [ ] memory-map access,
-- [ ] 60+ minute soak session.
-
-Benchmark at least:
-
-- an 8 Gen 2 Thor model,
-- Thor Lite / Snapdragon 865 if access to one is practical.
-
-### Core selection gate
-
-Do not choose the production DS core until Platinum Kaizo itself passes battery-save tests.
-
-Because the current Platinum Kaizo FAQ warns about melonDS-core saves, **DeSmuME should be treated as the compatibility baseline** even if melonDS DS benchmarks better.
-
----
-
-## Phase 3 — Dual-display DS renderer
-
-Goal: make DS gameplay feel native on Thor before adding companion features.
-
-- [ ] Split/crop the libretro DS framebuffer into logical top and bottom images if the core returns a combined framebuffer.
-- [ ] Render DS top screen on Thor top display.
-- [ ] Render DS bottom screen on Thor bottom display.
-- [ ] Correctly transform touchscreen coordinates.
-- [ ] Add Full DS / Sidecar / Companion toggle modes.
-- [ ] Handle display reconnect/sleep/orientation lifecycle.
-- [ ] Make screen geometry data-driven so later DS/3DS cores can reuse the renderer.
-
----
-
-## Phase 4 — Vanilla Platinum Gen 4 parser
-
-Do this against an exact verified vanilla Platinum revision before Platinum Kaizo.
-
-- [ ] Implement Gen 4 Pokémon decrypt/unshuffle/checksum parser.
-- [ ] Read player party and party count.
-- [ ] Read live HP/status/current stats.
-- [ ] Identify explicit battle lifecycle.
-- [ ] Resolve active player/enemy battlers.
-- [ ] Read enemy battle data safely.
-- [ ] Support singles first; doubles after singles are stable.
-- [ ] Produce core-independent `PlayerSnapshot` and `BattleSnapshot` objects.
-- [ ] Add fixtures/golden tests based on known Platinum states.
-
-Use `pret/pokeplatinum` and documented Gen 4 structures as references rather than guessing layouts.
-
----
-
-## Phase 5 — DS ROM data extraction / GameDataPack
-
-Goal: make calculator and documentation data version-aware and mostly local.
-
-- [ ] Build or adapt an `.nds` data reader.
-- [ ] Parse relevant NARC/data archives.
-- [ ] Extract species, moves, abilities, trainers, encounters, items and learnsets.
-- [ ] Normalize into `GameDataPack`.
-- [ ] Cache generated data by ROM SHA-256.
-- [ ] Verify extracted vanilla Platinum data against known references.
-- [ ] Compare architecture/research with existing Gen 4 tooling such as `hzla/ddex` before reinventing formats.
-
-This stage is highly reusable for future DS ROM hacks.
-
----
-
-## Phase 6 — Platinum Kaizo profile/version support
-
-Treat Platinum Kaizo as a separate exact ROM version on top of the shared Platinum engine.
-
-- [ ] Record exact supported Platinum Kaizo release/version/hash.
-- [ ] Verify emulator-core compatibility for that exact hash.
-- [ ] Generate/verify its `GameDataPack`.
-- [ ] Validate hack-specific move/type/ability/item mechanics.
-- [ ] Validate trainer sets and encounters.
-- [ ] Validate level-cap and other relevant game rules.
-- [ ] Locate/validate runtime party and battle structures for the exact build.
-- [ ] Compare findings with the official Platinum Kaizo Lua sync implementation where useful.
-- [ ] Never silently treat a future Kaizo update as the same supported build.
-
----
-
-## Phase 7 — Platinum Kaizo calculator and docs
-
-Platinum Kaizo already has an unusually mature tool ecosystem:
-
-- official/master documentation,
-- trainer/encounter/item sheets,
-- official/community damage calculators,
-- Gen 4 AI documentation,
-- DeSmuME live-sync Lua tooling.
-
-DualDex should use these as references, but its preferred final architecture should be local and version-aware.
-
-Features:
-
-- [ ] automatic player import from live memory,
-- [ ] automatic active-opponent import,
-- [ ] hack-accurate Gen 4 damage rules,
-- [ ] trainer lookup by current/selected fight,
-- [ ] searchable Pokémon/move/item docs,
-- [ ] encounter tables,
-- [ ] level-cap display,
-- [ ] context-sensitive links to official/community documentation,
-- [ ] offline operation for data available from `GameDataPack`.
-
-Do not copy community calculator/docs datasets into DualDex without confirming licensing/permission. Prefer extracting static game data from the user's ROM where reasonable.
-
----
-
-## Phase 8 — Advanced Thor-specific DS companion UX
-
-Only after the underlying emulator and parser are reliable:
-
-- [ ] top-screen battle sidecar in the 16:9 pillarbox region,
-- [ ] configurable sidecar width/content,
-- [ ] bottom-screen Game / Calc / Docs / Trainer / Party toggle,
-- [ ] controller shortcut to instantly restore DS bottom screen,
-- [ ] optional picture-in-picture DS bottom screen while browsing docs,
-- [ ] custom move-selection/battle controls using normal stylus input,
-- [ ] pre-battle trainer preview/planning screen,
-- [ ] automatic context switching that can always be disabled.
-
-The game itself must remain fully playable without any companion automation.
-
----
-
-## Phase 9 — General DS support
-
-Once Platinum / Platinum Kaizo proves the architecture:
-
-Potential next targets could include:
-
-- other Platinum hacks,
-- HeartGold/SoulSilver and hacks based on them,
-- Black/White and Black 2/White 2 later,
-- non-Pokémon DS games using emulator-only mode even without companion integration.
-
-At that point the Library should identify both **system** and **game integration status**:
-
-```text
-Pokémon Platinum Kaizo
-Nintendo DS · Platinum engine
-Verified integration
-Core: DeSmuME (example)
-
-Unrecognized DS Game
-Nintendo DS
-Emulation supported · No companion integration
-```
-
----
-
-# Save / Version Model
-
-Multi-system support makes the ROM identity work planned for the GBA beta even more important.
-
-Recommended long-term identity:
+For cartridge-era systems:
 
 ```text
 GameIdentity
@@ -606,112 +569,470 @@ GameIdentity
 - versionProfileId
 ```
 
-Storage should be system/core-aware without making the emulator core part of the user's game identity:
+For install/update-based platforms:
 
 ```text
-saves/<system>/<rom-hash>/battery.*
-states/<system>/<rom-hash>/<core-id>/...
-data/<system>/<rom-hash>/game-data-pack.*
+ModernGameIdentity
+- systemId
+- title/program identity
+- executable/build identity
+- update version
+- DLC/mod fingerprint
+- gameProfileId
+- versionProfileId
 ```
 
-Battery saves may sometimes migrate between cores; save states usually should be considered core/version-specific unless proven compatible.
+Storage should remain content-aware while save states remain emulator/core-specific:
+
+```text
+saves/<system>/<game-id>/...
+states/<system>/<game-id>/<emulator-id>/...
+data/<system>/<game-id>/game-data-pack.*
+profiles/<system>/<game-id>/...
+```
 
 ---
 
-# Licensing / Distribution Gate
+## 8. Generic display-surface model
 
-This must be resolved **before any DS core is bundled in a public DualDex build**.
+Do not special-case `topScreen` and `bottomScreen` forever.
 
-Current relevant licenses:
+```text
+GameVideoSurface
+- surfaceId
+- nativeWidth/nativeHeight
+- touchCapable
+- preferredPhysicalDisplay
+- crop/layout metadata
+```
+
+This supports:
+
+- GB/GBC/GBA: one game surface + companion surface,
+- DS: two game surfaces competing with companion space,
+- 3DS: two differently sized game surfaces,
+- Switch: one 16:9 game surface + a dedicated companion display.
+
+---
+
+## 9. Community integration manifests
+
+Long-term hack/mod support should be contributable without requiring people to rewrite DualDex internals.
+
+A safe declarative profile format could contain:
+
+```text
+IntegrationManifest
+- schemaVersion
+- systemId
+- baseGame
+- exact supported versions/hashes/build IDs
+- engine/layout profile
+- memory symbols/offsets
+- mechanics flags
+- data-extractor selection
+- docs links
+- feature support levels
+```
+
+Do not load arbitrary executable code from community profiles. Keep downloadable/community integrations declarative unless they are reviewed and shipped as part of DualDex itself.
+
+Hack authors could optionally publish a DualDex manifest alongside a release, which would be much more sustainable than reverse engineering every update after the fact.
+
+---
+
+# Platform UX Concepts
+
+## GB / GBC / GBA
+
+Keep the current model:
+
+- top display = game,
+- bottom display = full companion.
+
+This remains the cleanest DualDex experience.
+
+## Nintendo DS
+
+### Full DS mode
+
+- Top physical display = DS top screen.
+- Bottom physical display = DS touch screen.
+- Companion hidden.
+
+### Sidecar mode
+
+A 4:3 DS top screen rendered full-height on the Thor top display leaves horizontal pillarbox space. Use that space for a narrow opponent/damage sidebar without covering the game.
+
+### Companion mode
+
+- Top display keeps DS top screen + optional sidecar.
+- Bottom display toggles between the real DS touchscreen and DualDex tabs.
+- Provide an instant controller shortcut to restore the DS screen.
+
+### Advanced battle-control mode
+
+Only after exact UI state is verified, DualDex can offer enhanced move buttons showing damage ranges and then send normal stylus/button input to the game. Never modify game memory for basic control automation.
+
+## Nintendo 3DS
+
+Use the same philosophy as DS:
+
+- top display = 3DS top surface + optional sidecar,
+- bottom display = real 3DS touchscreen by default,
+- instant toggle to companion,
+- one-eye rendering initially.
+
+## Nintendo Switch
+
+This is the ideal eventual hardware layout:
+
+- top display = full game,
+- bottom display = persistent DualDex companion.
+
+No toggle is required unless the user explicitly wants a different layout.
+
+---
+
+# Long-Term Implementation Sequence
+
+## Phase 0 — Ship and stabilize GBA
+
+Do not begin this roadmap until:
+
+- the GBA public beta is in users’ hands,
+- save identity/storage migrations are stable,
+- emulator-core ownership/threading is stable,
+- engine/layout profiles are authoritative,
+- unsupported ROMs fail safely,
+- the calculator is profile/version aware.
+
+---
+
+## Phase 1 — Multi-system foundation
+
+Goal: make the existing GBA build run through generic interfaces with no user-visible regression.
+
+- [ ] `EmulatorSession`
+- [ ] `MemoryTransport`
+- [ ] `ConsoleAdapter`
+- [ ] generic video surfaces
+- [ ] generic input capabilities
+- [ ] generic system/save/state directories
+- [ ] core-independent snapshots
+- [ ] versioned `GameDataPack`
+- [ ] expanded game identity model
+
+Keep mGBA as the regression test.
+
+---
+
+## Phase 2 — Generation 1 / 2 support through mGBA
+
+Goal: prove the abstractions on a second Pokémon data format without another emulator core.
+
+- [ ] Red/Blue/Yellow verified profiles.
+- [ ] Crystal verified profile.
+- [ ] Gold/Silver profiles.
+- [ ] Gen 1/2 battle/calculator rules.
+- [ ] Initial popular-hack profiles only after vanilla layouts are solid.
+
+---
+
+## Phase 3 — Nintendo DS emulator prototype
+
+Goal:
+
+> **Vanilla Pokémon Platinum boots reliably, uses both Thor displays, accepts touch/controller input, and safely saves/restores.**
+
+Prototype DeSmuME and melonDS DS.
+
+Test:
+
+- [ ] boot/reboot,
+- [ ] battery save + restore,
+- [ ] save states,
+- [ ] audio/frame pacing,
+- [ ] suspend/resume,
+- [ ] touch/controller input,
+- [ ] both DS screens,
+- [ ] memory access,
+- [ ] 60+ minute soak sessions.
+
+Do not choose the production DS core until Platinum Kaizo save behavior has been validated.
+
+---
+
+## Phase 4 — Vanilla Platinum Gen 4 integration
+
+- [ ] Gen 4 Pokémon decrypt/unshuffle/checksum parser.
+- [ ] Player party snapshot.
+- [ ] Battle lifecycle.
+- [ ] Active player/enemy battlers.
+- [ ] Singles first; doubles afterward.
+- [ ] Gen 4 calculator rules.
+- [ ] Static Platinum `GameDataPack` extraction.
+- [ ] Golden fixtures/tests.
+
+Use documented structures and `pret/pokeplatinum` rather than guessing offsets.
+
+---
+
+## Phase 5 — Platinum Kaizo
+
+Treat every supported release as an exact version profile.
+
+- [ ] Record exact supported version/hash.
+- [ ] Validate emulator save compatibility.
+- [ ] Validate live memory layout.
+- [ ] Generate/verify hack-specific `GameDataPack`.
+- [ ] Validate trainer sets, encounters, moves, abilities and mechanics.
+- [ ] Auto-import player/opponent into calculator.
+- [ ] Trainer/encounter/docs lookup.
+- [ ] Add optional Thor sidecar/companion battle UX only after parsing is stable.
+
+Never silently treat a future Kaizo update as the same build.
+
+---
+
+## Phase 6 — Generation 5
+
+Reuse the entire DS platform layer.
+
+Recommended order:
+
+1. Vanilla Black/White exact revision.
+2. Vanilla Black 2/White 2.
+3. Static Gen 5 data extraction.
+4. Live player/battle parser.
+5. Gen 5 calculator integration.
+6. Popular hacks after exact-version validation.
+
+This should be substantially cheaper than the initial DS work.
+
+---
+
+## Phase 7 — Nintendo 3DS platform spike
+
+Goal:
+
+> **Run a vanilla Gen 6 title on Thor and prove reliable read-only guest-memory access through Azahar or another maintained 3DS emulator integration.**
+
+- [ ] Benchmark Azahar on relevant Thor models.
+- [ ] Validate top/bottom rendering strategy.
+- [ ] Validate saves/updates.
+- [ ] Prototype localhost RPC guest-memory reads.
+- [ ] Build `RpcMemoryTransport`.
+- [ ] Ensure bridge is localhost/read-only by default.
+- [ ] Decide external bridge vs deeper source integration.
+
+---
+
+## Phase 8 — Generations 6 and 7
+
+- [ ] XY static data extraction + `GameDataPack`.
+- [ ] XY live player/battle snapshots.
+- [ ] ORAS profile.
+- [ ] Gen 6 calculator mechanics.
+- [ ] Sun/Moon profile.
+- [ ] Ultra Sun/Ultra Moon profile.
+- [ ] Gen 7 calculator mechanics.
+- [ ] Exact-version hack/randomizer profiles.
+
+---
+
+## Phase 9 — Nintendo Switch bridge prototype
+
+Do not start by embedding a Switch emulator.
+
+Goal:
+
+> **Run one supported Switch Pokémon title in a maintained Android emulator and prove that DualDex can safely identify the exact game build and read verified guest-memory state through a debugger bridge.**
+
+- [ ] Benchmark maintained emulator(s) on Thor hardware.
+- [ ] Prototype GDB guest-memory reads.
+- [ ] Build `GdbRemoteMemoryTransport`.
+- [ ] Resolve guest module/build identity reliably.
+- [ ] Measure polling overhead.
+- [ ] Verify suspend/resume/reconnect behavior.
+- [ ] Decide whether an external bridge can provide acceptable dual-display UX.
+- [ ] Only consider source/native integration after the bridge proves the concept.
+
+---
+
+## Phase 10 — Generations 8 and 9
+
+Treat each Switch engine as its own integration.
+
+Possible order:
+
+1. Sword/Shield — conventional battle flow and strong tooling support.
+2. Let’s Go — separate mechanics/integration.
+3. BDSP — separate engine family.
+4. Legends: Arceus — custom battle semantics.
+5. Scarlet/Violet — latest/highest-complexity Gen 9 target.
+
+For each title:
+
+- [ ] exact base/update identity,
+- [ ] static `GameDataPack`,
+- [ ] party snapshot,
+- [ ] battle snapshot,
+- [ ] calculator mechanics,
+- [ ] DLC/update validation,
+- [ ] mod fingerprinting,
+- [ ] safe fallback when an unknown update/mod is detected.
+
+---
+
+## Phase 11 — Community compatibility ecosystem
+
+Only after the profile format is mature:
+
+- [ ] document `IntegrationManifest` schema,
+- [ ] validator CLI/tool,
+- [ ] diagnostics output for memory-layout authors,
+- [ ] community profile repository,
+- [ ] signed/versioned downloadable data profiles,
+- [ ] compatibility matrix generated from manifests/tests,
+- [ ] contribution docs aimed at ROM-hack authors.
+
+The ideal long-term outcome is that a hack author can ship a small DualDex compatibility manifest/data pack rather than waiting for DualDex itself to reverse engineer every release.
+
+---
+
+# Licensing / Distribution Strategy
+
+Licensing becomes increasingly important as more emulator projects are involved.
+
+Currently relevant examples include:
 
 - libretro API: MIT
 - mGBA: MPL-2.0
 - DeSmuME libretro: GPLv2
 - melonDS DS libretro: GPLv3+
+- Azahar: GPLv2-or-later
+- Eden: GPLv3-or-later
 
 DualDex is currently MIT licensed.
 
-GPL software can be used commercially, but bundling/linking/distributing a GPL core can introduce source-code and license obligations for the distributed work. **Do not assume that `dlopen()` or a plugin boundary automatically avoids those obligations.**
+Do **not** assume dynamic loading, IPC, a plugin boundary, or separate APK automatically answers copyleft/distribution questions.
 
-Before choosing the shipping model:
+Before shipping any new emulator component:
 
-- review the exact core license and dependency licenses,
-- document core source/version/build provenance,
-- determine the compliant source-distribution model,
-- preserve required notices/licenses,
-- ensure any future Play Store or monetized build remains license-compliant.
+- review its exact license and dependencies,
+- document source/version/build provenance,
+- determine whether the emulator is bundled, separately installed, or communicated with through a bridge,
+- preserve required license notices/source obligations,
+- review consequences for any future Play Store/commercial distribution.
 
-This is a licensing review item, not legal advice.
+This roadmap is technical planning, not legal advice.
 
-Also never bundle Nintendo ROMs, BIOS, firmware, NAND data, or other proprietary system files.
+DualDex must never distribute commercial ROMs, proprietary BIOS/firmware/NAND data, encryption keys, title keys, or copyrighted game assets. Users supply their own legally obtained game/system data where required.
 
 ---
 
 # Major Risks
 
-## 1. Core compatibility divergence
+## 1. Scope explosion
 
-A DS game may work in one core and not another. Game integrations must therefore be separated from core-specific behavior as much as possible.
+The architectural end state may support Gen 1–9, but implementation should happen one verified title at a time.
 
-## 2. Platinum overlays / version drift
+Do not build “Switch support” while DS is still unstable.
 
-Static absolute RAM offsets are especially fragile on Nintendo DS. Version hashes, engine profiles, memory-map metadata and validation are mandatory.
+## 2. Emulator project churn
 
-## 3. Touchscreen UX complexity
+3DS/Switch emulator projects can change maintainers, APIs, licenses and Android support. Keep `EmulatorSession` and `MemoryTransport` boundaries strong so an emulator can be replaced without rewriting Pokémon integration code.
 
-Replacing the original bottom screen with companion UI is useful only if returning to the real DS touchscreen is instant and predictable.
+## 3. Version/update drift
 
-## 4. Scope explosion
+The farther forward the generation, the less useful a single ROM hash becomes. Exact executable/update/mod identity is mandatory.
 
-DS support can easily turn into a general emulator rewrite. The first milestone should be narrowly defined:
+## 4. False confidence on hacks
 
-> **Vanilla Platinum runs reliably on both Thor screens through a generalized DualDex core host.**
+A recognizable game title does not mean its live memory layout is safe. Compatibility levels must remain explicit.
 
-Only then add live Pokémon parsing.
+## 5. Performance
 
-## 5. Licensing
+GB/GBC/GBA/DS polling is cheap. 3DS/Switch debugger transports may not be. Snapshot reads should be batched and rate-limited rather than issuing hundreds of tiny remote reads every frame.
 
-The technically best emulator core may not be the simplest core to distribute under DualDex's current project licensing. Resolve this before release packaging decisions.
+## 6. Licensing
+
+The technically best emulator may not be the simplest emulator to distribute with an MIT application. Resolve shipping architecture before committing to deep integration.
+
+## 7. UI complexity
+
+DS/3DS require preserving an actual touchscreen while offering companion UI. The user must always have an immediate, predictable way back to the original game screen.
 
 ---
 
-# Recommended First Deliverable
+# Recommended Order of Expansion
 
-When this roadmap eventually begins, do **not** start with calculator UI or Platinum Kaizo memory offsets.
+Once the current GBA beta is genuinely stable:
 
-Create a separate experimental branch whose only goal is:
+1. **Generalize GBA into the multi-system architecture.**
+2. **Gen 1/2 through the existing mGBA core.**
+3. **Nintendo DS platform + vanilla Platinum.**
+4. **Platinum Kaizo.**
+5. **Gen 5 on the existing DS platform.**
+6. **3DS platform spike with Azahar RPC/debug transport.**
+7. **Gen 6, then Gen 7.**
+8. **Switch debugger/bridge research.**
+9. **Gen 8 integrations.**
+10. **Gen 9 / Scarlet-Violet integration.**
+11. **Only then formalize a community manifest/profile ecosystem for broad hack/mod coverage.**
 
-> **Boot vanilla Pokémon Platinum through a DS libretro core, render the real top and bottom DS screens on the two AYN Thor displays, provide working touch/controller input, and safely save/restore the game.**
-
-If that prototype is clean, the rest of DualDex's existing companion architecture becomes reusable.
+This ordering maximizes reuse at each step rather than jumping directly from GBA to the hardest platform.
 
 ---
 
 # Reference / Research Links
 
-These sources informed this roadmap and should be rechecked when implementation starts because emulator cores and Platinum Kaizo can change over time.
+These should be rechecked when implementation starts because emulator projects and tooling change over time.
 
-### Emulator / libretro
+### Libretro / classic systems
 
-- melonDS DS libretro documentation: https://docs.libretro.com/library/melonds_ds/
-- melonDS DS core repository: https://github.com/JesseTG/melonds-ds
-- DeSmuME libretro documentation: https://docs.libretro.com/library/desmume/
-- Libretro core development overview: https://docs.libretro.com/development/cores/developing-cores/
-- Libretro license reference: https://docs.libretro.com/development/licenses/
+- mGBA libretro documentation: https://docs.libretro.com/library/mgba/
+- Libretro memory-monitoring reference: https://docs.libretro.com/guides/memorymonitoring/
+- Gambatte documentation: https://docs.libretro.com/library/gambatte/
+- SameBoy documentation: https://docs.libretro.com/library/sameboy/
+- melonDS DS documentation: https://docs.libretro.com/library/melonds_ds/
+- DeSmuME documentation: https://docs.libretro.com/library/desmume/
+- Citra libretro documentation: https://docs.libretro.com/library/citra/
 
-### Pokémon Platinum / Gen 4 reverse engineering
+### Reverse engineering / ROM data
 
-- pret Pokémon Platinum decompilation: https://github.com/pret/pokeplatinum
-- Project Pokémon Gen 4 PKM structure documentation: https://projectpokemon.org/home/docs/gen-4/pkm-structure-r65/
+- pret organization / reverse-engineering projects: https://github.com/pret
+- Pokémon Red/Blue disassembly: https://github.com/pret/pokered
+- Pokémon Crystal disassembly: https://github.com/pret/pokecrystal
+- Pokémon Platinum decompilation: https://github.com/pret/pokeplatinum
+- Pokémon Black decompilation project: https://github.com/pokemodding/pokeblack
+- DSPRE Gen 4 ROM editor: https://github.com/DS-Pokemon-Rom-Editor/DSPRE
+- Frost’s Gen 5 Editor: https://github.com/FrostFalcon/FrostsGen5Editor
+- Gen 4 ROM-data/calc tooling (`ddex`): https://github.com/hzla/ddex
+- pk3DS 3DS Pokémon ROM tooling: https://github.com/kwsch/pk3DS
+- pkNX Switch Pokémon ROM tooling: https://github.com/kwsch/pkNX
+- PKHeX save/Pokémon-format research reference: https://github.com/kwsch/PKHeX
 
-### Platinum Kaizo ecosystem
+### Calculator
+
+- Smogon damage calculator / `@smogon/calc`: https://github.com/smogon/damage-calc
+
+### 3DS emulator
+
+- Azahar: https://github.com/azahar-emu/azahar
+- Azahar RPC/debug configuration source: https://github.com/azahar-emu/azahar/blob/master/src/android/app/src/main/jni/default_ini.h
+
+### Switch emulator research
+
+- Eden project mirror: https://github.com/eden-emulator/mirror
+- Eden guest-debugging documentation: https://github.com/eden-emulator/mirror/blob/master/docs/Debug.md
+
+### Platinum Kaizo
 
 - Platinum Kaizo documentation/resources: https://platinumkaizo.com/documentation-resources/
 - Platinum Kaizo FAQ / emulator notes: https://platinumkaizo.com/frequently-asked-questions/
-- Community resource hub: https://emi.dev/platinum-kaizo/
-- Official Platinum Kaizo calculator source: https://git.anastarawneh.com/anas/PKCalc
 - Platinum Kaizo live-sync Lua tool: https://github.com/anastarawneh/PKLuaScript
-- Gen 4 ROM data/calc tooling reference (`ddex`): https://github.com/hzla/ddex
 
 ### AYN Thor
 
@@ -721,14 +1042,17 @@ These sources informed this roadmap and should be rechecked when implementation 
 
 # Relationship to the Current Beta
 
-This roadmap should stay **outside the current release checklist's beta exit criteria**.
+This roadmap stays **outside the current release checklist’s beta exit criteria**.
 
 The current priority remains:
 
 1. protect GBA saves,
-2. stabilize the current mGBA core lifecycle,
+2. stabilize the current mGBA lifecycle,
 3. make ROM/version detection trustworthy,
-4. make the existing GBA companion/calculator accurate,
-5. release and learn from the AYN Thor beta.
+4. make GBA memory profiles authoritative,
+5. make the existing companion/calculator accurate,
+6. release and learn from real AYN Thor users.
 
-DS support should begin only after those foundations are proven, because the same work—ROM identity, core ownership, versioned engine layouts and generic snapshots—is exactly what will make this roadmap much easier later.
+That work is not separate from the Gen 1–9 vision. It is the foundation for it.
+
+If DualDex gets ROM identity, memory transport, versioned profiles, core ownership, generic snapshots and calculator rules right on GBA, the project can grow generation-by-generation without becoming a collection of unrelated emulator hacks.
