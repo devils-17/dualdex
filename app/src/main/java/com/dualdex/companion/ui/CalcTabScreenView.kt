@@ -318,6 +318,11 @@ class CalcTabScreenView(
                 refreshUI()
             }
         }
+        scope.launch {
+            viewModel.activeEnemyMemberIndex.collectLatest {
+                refreshUI()
+            }
+        }
     }
 
     override fun onDetachedFromWindow() {
@@ -396,7 +401,8 @@ class CalcTabScreenView(
 
         // 2. Auto-populate defender from opponent memory read if in battle!
         if (inBattle && enemyParty.isNotEmpty()) {
-            val enemyMon = enemyParty[0]
+            val enemySlot = viewModel.activeEnemyMemberIndex.value
+            val enemyMon = if (enemySlot in enemyParty.indices) enemyParty[enemySlot] else enemyParty[0]
             val speciesName = SpeciesDatabase.get(enemyMon.species).name
             selectedDefenderSpecies = speciesName
             if (defenderAutoInput.text.toString() != selectedDefenderSpecies) {
@@ -506,7 +512,10 @@ class CalcTabScreenView(
 
         val enemyParty = viewModel.enemyParty.value
         val inBattle = viewModel.isInBattle.value
-        val enemyMon = if (inBattle && enemyParty.isNotEmpty()) enemyParty[0] else null
+        val enemySlot = viewModel.activeEnemyMemberIndex.value
+        val enemyMon = if (inBattle && enemyParty.isNotEmpty()) {
+            if (enemySlot in enemyParty.indices) enemyParty[enemySlot] else enemyParty[0]
+        } else null
 
         val defInput = if (enemyMon != null) {
             CalcPokemonInput(

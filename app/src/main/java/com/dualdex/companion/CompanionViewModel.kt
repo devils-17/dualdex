@@ -50,6 +50,9 @@ class CompanionViewModel(
     private val _selectedMemberIndex = MutableStateFlow(0)
     val selectedMemberIndex: StateFlow<Int> = _selectedMemberIndex.asStateFlow()
 
+    private val _activeEnemyMemberIndex = MutableStateFlow(0)
+    val activeEnemyMemberIndex: StateFlow<Int> = _activeEnemyMemberIndex.asStateFlow()
+
     private val _isInBattle = MutableStateFlow(false)
     val isInBattle: StateFlow<Boolean> = _isInBattle.asStateFlow()
 
@@ -126,6 +129,14 @@ class CompanionViewModel(
                         val activeSlot = LibretroHost.nativeGetActiveBattlerSlot(gameId)
                         if (activeSlot in 0..5 && activeSlot != _selectedMemberIndex.value) {
                             _selectedMemberIndex.value = activeSlot
+                        }
+                        val enemyActiveSlot = LibretroHost.nativeGetActiveEnemyBattlerSlot(gameId)
+                        if (enemyActiveSlot in 0..5 && enemyActiveSlot != _activeEnemyMemberIndex.value) {
+                            _activeEnemyMemberIndex.value = enemyActiveSlot
+                        }
+                    } else {
+                        if (_activeEnemyMemberIndex.value != 0) {
+                            _activeEnemyMemberIndex.value = 0
                         }
                     }
 

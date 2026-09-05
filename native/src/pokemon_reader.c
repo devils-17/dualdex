@@ -71,8 +71,8 @@ static const GameMemoryConfig CONFIG_HEART_AND_SOUL = {
     .enemy_party_offset = 0x345A4,
     .enemy_party_count_offset = 0x345A0,
     .battle_mons_offset = 0x3A5A4,
-    .battle_mons_size = 96,
-    .battle_mons_hp_offset = 46,
+    .battle_mons_size = 88,
+    .battle_mons_hp_offset = 40,
     .has_evs = true,
     .has_ivs = true
 };
@@ -488,6 +488,115 @@ uint8_t pokemon_scan_ewram_for_party(
     return 0;
 }
 
+static void sync_live_player_battle_mon(
+    const uint8_t* ewram,
+    size_t ewram_size,
+    const GameMemoryConfig* config,
+    PartySnapshot* out_snapshot
+) {
+    if (!config || config->battle_mons_offset == 0 ||
+        config->battle_mons_offset + config->battle_mons_size > ewram_size ||
+        out_snapshot->count == 0) {
+        return;
+    }
+
+    const uint8_t* b0 = ewram + config->battle_mons_offset;
+    uint16_t b0_species = read16_le(b0);
+    if (b0_species == 0 || b0_species >= 2000) return;
+
+    uint16_t b0_hp = read16_le(b0 + config->battle_mons_hp_offset);
+    bool matched = false;
+
+    // Check gBattlerPartyIndexes[0] at (battle_mons_offset - 24)
+    if (config->battle_mons_offset >= 24) {
+        uint16_t b0_idx = read16_le(ewram + config->battle_mons_offset - 24);
+        if (b0_idx < out_snapshot->count && out_snapshot->members[b0_idx].species == b0_species) {
+            if (b0_hp <= out_snapshot->members[b0_idx].max_hp) {
+                out_snapshot->members[b0_idx].current_hp = b0_hp;
+            }
+            out_snapshot->active_battler_slot = (int8_t)b0_idx;
+            matched = true;
+        }
+    }
+
+    if (!matched) {
+        for (uint8_t i = 0; i < out_snapshot->count; i++) {
+            if (out_snapshot->members[i].species == b0_species) {
+                if (b0_hp <= out_snapshot->members[i].max_hp) {
+                    out_snapshot->members[i].current_hp = b0_hp;
+                }
+                out_snapshot->active_battler_slot = (int8_t)i;
+                break;
+            }
+        }
+    }
+}
+
+static void sync_live_enemy_battle_mon(
+    const uint8_t* ewram,
+    size_t ewram_size,
+    const GameMemoryConfig* config,
+    PartySnapshot* out_snapshot
+) {
+    if (out_snapshot->count == 0) return;
+
+    if (!config || config->battle_mons_offset == 0 ||
+        config->battle_mons_offset + (2 * config->battle_mons_size) > ewram_size) {
+        if (out_snapshot->active_battler_slot < 0) {
+            out_snapshot->active_battler_slot = 0;
+        }
+        return;
+    }
+
+    const uint8_t* b1 = ewram + config->battle_mons_offset + config->battle_mons_size;
+    uint16_t b1_species = read16_le(b1);
+    if (b1_species == 0 || b1_species >= 2000) {
+        if (out_snapshot->active_battler_slot < 0) {
+            out_snapshot->active_battler_slot = 0;
+        }
+        return;
+    }
+
+    uint16_t b1_hp = read16_le(b1 + config->battle_mons_hp_offset);
+    bool matched = false;
+
+    // Check gBattlerPartyIndexes[1] at (battle_mons_offset - 22)
+    if (config->battle_mons_offset >= 24) {
+        uint16_t b1_idx = read16_le(ewram + config->battle_mons_offset - 22);
+        if (b1_idx < out_snapshot->count && out_snapshot->members[b1_idx].species == b1_species) {
+            if (b1_hp <= out_snapshot->members[b1_idx].max_hp) {
+                out_snapshot->members[b1_idx].current_hp = b1_hp;
+            }
+            out_snapshot->active_battler_slot = (int8_t)b1_idx;
+            matched = true;
+        }
+    }
+
+    if (!matched) {
+        // If multiple members have same species, prefer member with current_hp > 0 when b1_hp > 0
+        int chosen_slot = -1;
+        for (uint8_t i = 0; i < out_snapshot->count; i++) {
+            if (out_snapshot->members[i].species == b1_species) {
+                if (chosen_slot == -1) chosen_slot = i;
+                if (b1_hp > 0 && out_snapshot->members[i].current_hp > 0) {
+                    chosen_slot = i;
+                    break;
+                }
+            }
+        }
+        if (chosen_slot >= 0) {
+            if (b1_hp <= out_snapshot->members[chosen_slot].max_hp) {
+                out_snapshot->members[chosen_slot].current_hp = b1_hp;
+            }
+            out_snapshot->active_battler_slot = (int8_t)chosen_slot;
+        }
+    }
+
+    if (out_snapshot->active_battler_slot < 0) {
+        out_snapshot->active_battler_slot = 0;
+    }
+}
+
 uint8_t pokemon_read_player_party(
     const uint8_t* ewram,
     size_t ewram_size,
@@ -525,24 +634,7 @@ uint8_t pokemon_read_player_party(
             if (count_verified && valid_count > 0) {
                 out_snapshot->count = valid_count;
                 s_cached_player_party_offset = (uint32_t)config->player_party_offset;
-
-                // If in battle and battle_mons is configured, sync live battler 0 (player active mon)
-                if (config->battle_mons_offset > 0 && config->battle_mons_offset + config->battle_mons_size <= ewram_size) {
-                    const uint8_t* b0 = ewram + config->battle_mons_offset;
-                    uint16_t b0_species = read16_le(b0);
-                    if (b0_species > 0 && b0_species < 2000) {
-                        uint16_t b0_hp = read16_le(b0 + config->battle_mons_hp_offset);
-                        for (uint8_t i = 0; i < valid_count; i++) {
-                            if (out_snapshot->members[i].species == b0_species) {
-                                if (b0_hp <= out_snapshot->members[i].max_hp) {
-                                    out_snapshot->members[i].current_hp = b0_hp;
-                                }
-                                out_snapshot->active_battler_slot = (int8_t)i;
-                                break;
-                            }
-                        }
-                    }
-                }
+                sync_live_player_battle_mon(ewram, ewram_size, config, out_snapshot);
                 return valid_count;
             }
         }
@@ -564,23 +656,7 @@ uint8_t pokemon_read_player_party(
                 } else break;
             }
             out_snapshot->count = valid_count;
-
-            if (config && config->battle_mons_offset > 0 && config->battle_mons_offset + config->battle_mons_size <= ewram_size) {
-                const uint8_t* b0 = ewram + config->battle_mons_offset;
-                uint16_t b0_species = read16_le(b0);
-                if (b0_species > 0 && b0_species < 2000) {
-                    uint16_t b0_hp = read16_le(b0 + config->battle_mons_hp_offset);
-                    for (uint8_t i = 0; i < valid_count; i++) {
-                        if (out_snapshot->members[i].species == b0_species) {
-                            if (b0_hp <= out_snapshot->members[i].max_hp) {
-                                out_snapshot->members[i].current_hp = b0_hp;
-                            }
-                            out_snapshot->active_battler_slot = (int8_t)i;
-                            break;
-                        }
-                    }
-                }
-            }
+            sync_live_player_battle_mon(ewram, ewram_size, config, out_snapshot);
             return valid_count;
         } else {
             s_cached_player_party_offset = 0;
@@ -589,21 +665,8 @@ uint8_t pokemon_read_player_party(
 
     // 3. Fallback: Dynamic EWRAM Pattern Scan (ROM hacks, custom builds)
     uint8_t count = pokemon_scan_ewram_for_party(ewram, ewram_size, out_snapshot);
-    if (count > 0 && config && config->battle_mons_offset > 0 && config->battle_mons_offset + config->battle_mons_size <= ewram_size) {
-        const uint8_t* b0 = ewram + config->battle_mons_offset;
-        uint16_t b0_species = read16_le(b0);
-        if (b0_species > 0 && b0_species < 2000) {
-            uint16_t b0_hp = read16_le(b0 + config->battle_mons_hp_offset);
-            for (uint8_t i = 0; i < count; i++) {
-                if (out_snapshot->members[i].species == b0_species) {
-                    if (b0_hp <= out_snapshot->members[i].max_hp) {
-                        out_snapshot->members[i].current_hp = b0_hp;
-                    }
-                    out_snapshot->active_battler_slot = (int8_t)i;
-                    break;
-                }
-            }
-        }
+    if (count > 0) {
+        sync_live_player_battle_mon(ewram, ewram_size, config, out_snapshot);
     }
     return count;
 }
@@ -653,18 +716,18 @@ uint8_t pokemon_read_enemy_party(
         size_t off = candidate_offsets[c];
         const RawGbaPokemon* raw = (const RawGbaPokemon*)(ewram + off);
 
-        // Fast reject: not an active enemy mon
+        // Fast reject: not an enemy mon
         if (raw->pid == 0 || raw->otid == 0 || raw->otid == player_otid) continue;
         if (raw->max_hp == 0 || raw->max_hp > 2000) continue;
         if (raw->current_hp > raw->max_hp) continue;
-        if (raw->current_hp == 0) continue; // Active opponent in battle must have HP > 0
+        // Do NOT reject fainted mon (raw->current_hp == 0)! Slot 0 is still slot 0 when fainted!
         if (raw->level == 0 || raw->level > 100) continue;
         if (raw->attack == 0 || raw->defense == 0) continue;
 
         ParsedPokemon test_mon;
         if (!pokemon_parse_single((const uint8_t*)raw, true, &test_mon)) continue;
         if (test_mon.species == 0 || test_mon.species >= 2000) continue;
-        if (test_mon.current_hp == 0) continue;
+        // Do NOT reject test_mon.current_hp == 0!
 
         // Found active enemy party!
         uint8_t count = 0;
@@ -682,24 +745,7 @@ uint8_t pokemon_read_enemy_party(
         out_snapshot->count = count;
         s_cached_enemy_party_offset = (uint32_t)off;
 
-        // Sync live in-battle HP for enemy battler 1 if battle_mons is configured
-        if (config && config->battle_mons_offset > 0 &&
-            config->battle_mons_offset + (2 * config->battle_mons_size) <= ewram_size) {
-            const uint8_t* b1 = ewram + config->battle_mons_offset + config->battle_mons_size;
-            uint16_t b1_species = read16_le(b1);
-            if (b1_species > 0 && b1_species < 2000) {
-                uint16_t b1_hp = read16_le(b1 + config->battle_mons_hp_offset);
-                for (uint8_t i = 0; i < count; i++) {
-                    if (out_snapshot->members[i].species == b1_species) {
-                        if (b1_hp <= out_snapshot->members[i].max_hp) {
-                            out_snapshot->members[i].current_hp = b1_hp;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
+        sync_live_enemy_battle_mon(ewram, ewram_size, config, out_snapshot);
         return count;
     }
 
@@ -713,13 +759,23 @@ uint8_t pokemon_read_enemy_party(
             const RawGbaPokemon* raw = (const RawGbaPokemon*)(ewram + off);
             if (raw->pid == 0 || raw->otid == 0 || raw->otid == player_otid) continue;
             if (raw->max_hp == 0 || raw->max_hp > 2000) continue;
-            if (raw->current_hp > raw->max_hp || raw->current_hp == 0) continue;
+            if (raw->current_hp > raw->max_hp) continue;
             if (raw->level == 0 || raw->level > 100) continue;
             if (raw->attack == 0 || raw->defense == 0) continue;
 
+            // Ensure this is slot 0 of enemy party, not slot 1-5
+            if (off >= sizeof(RawGbaPokemon)) {
+                ParsedPokemon prev_mon;
+                if (pokemon_parse_single(ewram + off - sizeof(RawGbaPokemon), true, &prev_mon)) {
+                    if (prev_mon.species > 0 && prev_mon.species < 2000) {
+                        continue; // Preceding slot is already a party mon
+                    }
+                }
+            }
+
             ParsedPokemon test_mon;
             if (!pokemon_parse_single((const uint8_t*)raw, true, &test_mon)) continue;
-            if (test_mon.species == 0 || test_mon.species >= 2000 || test_mon.current_hp == 0) continue;
+            if (test_mon.species == 0 || test_mon.species >= 2000) continue;
 
             // Found enemy party via scan!
             uint8_t count = 0;
@@ -737,23 +793,7 @@ uint8_t pokemon_read_enemy_party(
             out_snapshot->count = count;
             s_cached_enemy_party_offset = (uint32_t)off;
 
-            if (config && config->battle_mons_offset > 0 &&
-                config->battle_mons_offset + (2 * config->battle_mons_size) <= ewram_size) {
-                const uint8_t* b1 = ewram + config->battle_mons_offset + config->battle_mons_size;
-                uint16_t b1_species = read16_le(b1);
-                if (b1_species > 0 && b1_species < 2000) {
-                    uint16_t b1_hp = read16_le(b1 + config->battle_mons_hp_offset);
-                    for (uint8_t i = 0; i < count; i++) {
-                        if (out_snapshot->members[i].species == b1_species) {
-                            if (b1_hp <= out_snapshot->members[i].max_hp) {
-                                out_snapshot->members[i].current_hp = b1_hp;
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-
+            sync_live_enemy_battle_mon(ewram, ewram_size, config, out_snapshot);
             return count;
         }
     }

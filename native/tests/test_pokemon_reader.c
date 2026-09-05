@@ -531,8 +531,8 @@ static void test_heart_and_soul_party_and_battle_hp_sync(void) {
         memcpy(ewram + hns_cfg->player_party_offset + sizeof(RawGbaPokemon), &mon, sizeof(RawGbaPokemon));
     }
 
-    // 3. Setup Enemy Party (Pidgey #16 in enemy slot 0)
-    ewram[hns_cfg->enemy_party_count_offset] = 1;
+    // 3. Setup Enemy Party (2 Pokemon: Pidgey #16 in slot 0, Rattata #19 in slot 1)
+    ewram[hns_cfg->enemy_party_count_offset] = 2;
     {
         RawGbaPokemon enemy;
         memset(&enemy, 0, sizeof(enemy));
@@ -557,21 +557,48 @@ static void test_heart_and_soul_party_and_battle_hp_sync(void) {
                          enemy.raw_substructures, &enemy.checksum);
         memcpy(ewram + hns_cfg->enemy_party_offset, &enemy, sizeof(RawGbaPokemon));
     }
+    {
+        RawGbaPokemon enemy2;
+        memset(&enemy2, 0, sizeof(enemy2));
+        enemy2.pid = 0xCCDDEEFF;
+        enemy2.otid = 0x99990000;
+        enemy2.level = 12;
+        enemy2.max_hp = 35;
+        enemy2.current_hp = 35;
+        enemy2.attack = 22;
+        enemy2.defense = 16;
+        enemy2.speed = 30;
+        enemy2.sp_attack = 15;
+        enemy2.sp_defense = 16;
 
-    // 4. Populate live gBattleMons (BattlePokemon struct size = 96, HP at offset 46)
+        SubstructGrowth g = {.species = 19}; // Rattata
+        SubstructAttacks a = {.moves = {33, 28, 0, 0}, .pp = {35, 30, 0, 0}}; // Tackle, Sand Attack
+        SubstructEVs e = {0};
+        SubstructMisc m = {.iv_egg_ability = 20};
+
+        pack_and_encrypt(enemy2.pid, enemy2.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         enemy2.raw_substructures, &enemy2.checksum);
+        memcpy(ewram + hns_cfg->enemy_party_offset + sizeof(RawGbaPokemon), &enemy2, sizeof(RawGbaPokemon));
+    }
+
+    // 4. Populate live gBattleMons (BattlePokemon struct size = 88, HP at offset 40)
+    TEST_ASSERT(hns_cfg->battle_mons_size == 88, "HnS battle_mons_size must be 88");
+    TEST_ASSERT(hns_cfg->battle_mons_hp_offset == 40, "HnS battle_mons_hp_offset must be 40");
+
     // Battler 0: Player active mon (Cyndaquil #155), took damage! HP is 28/50
     uint8_t* b0 = ewram + hns_cfg->battle_mons_offset;
     b0[0] = 155 & 0xFF; // species low
     b0[1] = (155 >> 8) & 0xFF; // species high
-    b0[46] = 28; // current HP low
-    b0[47] = 0;  // current HP high
+    b0[40] = 28; // current HP low (offset 40)
+    b0[41] = 0;  // current HP high
 
     // Battler 1: Enemy active mon (Pidgey #16), took damage! HP is 12/40
     uint8_t* b1 = ewram + hns_cfg->battle_mons_offset + hns_cfg->battle_mons_size;
     b1[0] = 16 & 0xFF; // species low
     b1[1] = (16 >> 8) & 0xFF; // species high
-    b1[46] = 12; // current HP low
-    b1[47] = 0;  // current HP high
+    b1[40] = 12; // current HP low (offset 40)
+    b1[41] = 0;  // current HP high
 
     // 5. Read player party and verify live HP sync & active battler slot
     PartySnapshot player_snap;
@@ -583,18 +610,48 @@ static void test_heart_and_soul_party_and_battle_hp_sync(void) {
     TEST_ASSERT(player_snap.members[1].current_hp == 60, "Totodile HP should remain 60");
     TEST_ASSERT(player_snap.active_battler_slot == 0, "Active battler slot should be 0 (Cyndaquil)");
 
-    // 6. Read enemy party and verify live HP sync
+    // 6. Read enemy party and verify live HP sync & active battler slot
     PartySnapshot enemy_snap;
     uint8_t enemy_count = pokemon_read_enemy_party(ewram, EWRAM_SIZE, hns_cfg, &enemy_snap);
-    TEST_ASSERT(enemy_count == 1, "Enemy party count should be 1");
+    TEST_ASSERT(enemy_count == 2, "Enemy party count should be 2");
     TEST_ASSERT(enemy_snap.members[0].species == 16, "Enemy slot 0 should be Pidgey");
     TEST_ASSERT(enemy_snap.members[0].current_hp == 12, "Enemy Pidgey HP should be 12 (live from gBattleMons!)");
+    TEST_ASSERT(enemy_snap.members[1].species == 19, "Enemy slot 1 should be Rattata");
+    TEST_ASSERT(enemy_snap.members[1].current_hp == 35, "Enemy Rattata HP should be 35");
+    TEST_ASSERT(enemy_snap.active_battler_slot == 0, "Active enemy battler slot should be 0 (Pidgey)");
 
-    // 7. Test mid-battle switch: player sends out Totodile (species 158), HP = 48
+    // 7. Enemy Pidgey faints (HP drops to 0)
+    b1[40] = 0;
+    b1[41] = 0;
+    // Also simulate EWRAM raw enemy mon HP reaching 0
+    RawGbaPokemon* enemy_raw_0 = (RawGbaPokemon*)(ewram + hns_cfg->enemy_party_offset);
+    enemy_raw_0->current_hp = 0;
+
+    PartySnapshot fainted_enemy_snap;
+    pokemon_read_enemy_party(ewram, EWRAM_SIZE, hns_cfg, &fainted_enemy_snap);
+    TEST_ASSERT(fainted_enemy_snap.count == 2, "Enemy party count must still be 2 even when slot 0 faints!");
+    TEST_ASSERT(fainted_enemy_snap.members[0].species == 16, "Slot 0 must remain Pidgey!");
+    TEST_ASSERT(fainted_enemy_snap.members[0].current_hp == 0, "Pidgey HP must be 0!");
+    TEST_ASSERT(fainted_enemy_snap.active_battler_slot == 0, "Active enemy slot must STAY 0 until opponent sends out next mon!");
+
+    // 8. Opponent sends out Rattata (species 19, HP = 35)
+    b1[0] = 19 & 0xFF;
+    b1[1] = (19 >> 8) & 0xFF;
+    b1[40] = 35;
+    b1[41] = 0;
+
+    PartySnapshot sendout_snap;
+    pokemon_read_enemy_party(ewram, EWRAM_SIZE, hns_cfg, &sendout_snap);
+    TEST_ASSERT(sendout_snap.count == 2, "Enemy party count should be 2");
+    TEST_ASSERT(sendout_snap.active_battler_slot == 1, "Active enemy slot must now update to 1 (Rattata)!");
+    TEST_ASSERT(sendout_snap.members[1].species == 19, "Slot 1 must be Rattata");
+    TEST_ASSERT(sendout_snap.members[1].current_hp == 35, "Rattata HP must be 35");
+
+    // 9. Test mid-battle player switch: player sends out Totodile (species 158), HP = 48
     b0[0] = 158 & 0xFF;
     b0[1] = (158 >> 8) & 0xFF;
-    b0[46] = 48;
-    b0[47] = 0;
+    b0[40] = 48;
+    b0[41] = 0;
 
     PartySnapshot switch_snap;
     pokemon_read_player_party(ewram, EWRAM_SIZE, hns_cfg, &switch_snap);
