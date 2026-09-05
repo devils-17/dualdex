@@ -6,7 +6,9 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -25,7 +27,7 @@ import kotlinx.coroutines.launch
 class MapScreenView(
     context: Context,
     private val viewModel: CompanionViewModel
-) : LinearLayout(context) {
+) : FrameLayout(context) {
 
     private val density = context.resources.displayMetrics.density
     private fun dp(v: Int): Int = (v * density).toInt()
@@ -47,137 +49,149 @@ class MapScreenView(
     private val gymInfoView: TextView
     private val poiContainer: LinearLayout
     private val connectionsView: TextView
+    private val expandToggleView: TextView
+    private val expandableContent: LinearLayout
+    private var isSheetExpanded: Boolean = false
 
+    private val regionButtons = mutableMapOf<RegionId, Button>()
     private var observerJob: Job? = null
 
     init {
-        orientation = VERTICAL
         setBackgroundColor(0xFF0F172A.toInt()) // Dark slate navy
 
-        // 1. Top Header: Live Player Location Bar
-        val headerBar = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            setBackgroundColor(0xFF1E293B.toInt())
-        }
+        // 1. Full-bleed interactive map canvas (fills entire container)
+        regionMapView.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        addView(regionMapView)
 
-        val locationTextCol = LinearLayout(context).apply {
-            orientation = VERTICAL
-            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
+        // 2. Top Floating Control Pill (compact translucent card over map)
+        val topPill = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(0xEE162032.toInt())
+                setStroke(dp(1), 0x99334155.toInt())
+            }
+        }
+        val topLp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP
+            setMargins(dp(8), dp(8), dp(8), 0)
+        }
+        addView(topPill, topLp)
+
+        // Top Row: Location Title, Environment Badge, Quick Action Buttons
+        val topRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
 
         locationTitleView = TextView(context).apply {
             text = "🗺️ Loading Town Map..."
             setTextColor(0xFFF8FAFC.toInt())
-            textSize = 15f
+            textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
         }
-        locationTextCol.addView(locationTitleView)
-
-        locationSubtitleView = TextView(context).apply {
-            text = "Reading live EWRAM player position..."
-            setTextColor(0xFF94A3B8.toInt())
-            textSize = 11.5f
-        }
-        locationTextCol.addView(locationSubtitleView)
-
-        headerBar.addView(locationTextCol)
+        topRow.addView(locationTitleView)
 
         envBadgeView = TextView(context).apply {
             text = "🌲 Overworld"
             setTextColor(0xFF38BDF8.toInt())
-            textSize = 11f
+            textSize = 10f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setPadding(dp(6), dp(3), dp(6), dp(3))
             background = GradientDrawable().apply {
                 cornerRadius = dp(6).toFloat()
                 setColor(0xFF0F172A.toInt())
             }
         }
-        headerBar.addView(envBadgeView)
-
-        addView(headerBar)
-
-        // 2. Action Controls Bar (Center on Player, Reset Zoom, Region Switchers)
-        val controlsBar = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            setBackgroundColor(0xFF161E2E.toInt())
+        val envLp = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            setMargins(dp(6), 0, dp(6), 0)
         }
+        topRow.addView(envBadgeView, envLp)
 
         val centerBtn = Button(context).apply {
-            text = "🎯 Center on Player"
-            textSize = 11f
+            text = "🎯"
+            textSize = 12f
             setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
             background = GradientDrawable().apply {
                 cornerRadius = dp(8).toFloat()
                 setColor(0xFF2563EB.toInt())
             }
-            setPadding(dp(10), dp(4), dp(10), dp(4))
-            setOnClickListener {
-                regionMapView.centerOnPlayer()
-            }
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            setOnClickListener { regionMapView.centerOnPlayer() }
         }
-        val centerLp = LayoutParams(LayoutParams.WRAP_CONTENT, dp(34)).apply {
-            setMargins(0, 0, dp(8), 0)
+        val centerLp = LinearLayout.LayoutParams(dp(36), dp(30)).apply {
+            setMargins(0, 0, dp(4), 0)
         }
-        controlsBar.addView(centerBtn, centerLp)
+        topRow.addView(centerBtn, centerLp)
 
         val resetZoomBtn = Button(context).apply {
-            text = "🔍 Reset Zoom"
-            textSize = 11f
+            text = "🔍"
+            textSize = 12f
             setTextColor(0xFFCBD5E1.toInt())
             background = GradientDrawable().apply {
                 cornerRadius = dp(8).toFloat()
                 setColor(0xFF334155.toInt())
             }
-            setPadding(dp(10), dp(4), dp(10), dp(4))
-            setOnClickListener {
-                regionMapView.resetZoom()
-            }
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            setOnClickListener { regionMapView.resetZoom() }
         }
-        val resetLp = LayoutParams(LayoutParams.WRAP_CONTENT, dp(34)).apply {
-            setMargins(0, 0, dp(8), 0)
-        }
-        controlsBar.addView(resetZoomBtn, resetLp)
+        val resetLp = LinearLayout.LayoutParams(dp(36), dp(30))
+        topRow.addView(resetZoomBtn, resetLp)
 
-        val spacer = View(context).apply {
-            layoutParams = LayoutParams(0, 1, 1.0f)
-        }
-        controlsBar.addView(spacer)
+        topPill.addView(topRow)
 
-        // Region Switcher buttons
+        // Sub Row: Coordinates / Map Subtitle & Region Selector Buttons
+        val subRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, 0)
+        }
+
+        locationSubtitleView = TextView(context).apply {
+            text = "Reading live EWRAM player position..."
+            setTextColor(0xFF94A3B8.toInt())
+            textSize = 10.5f
+            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+        subRow.addView(locationSubtitleView)
+
         val johtoBtn = createRegionTabButton("Johto", RegionId.JOHTO)
         val kantoBtn = createRegionTabButton("Kanto", RegionId.KANTO)
         val hoennBtn = createRegionTabButton("Hoenn", RegionId.HOENN)
+        subRow.addView(johtoBtn)
+        subRow.addView(kantoBtn)
+        subRow.addView(hoennBtn)
 
-        controlsBar.addView(johtoBtn)
-        controlsBar.addView(kantoBtn)
-        controlsBar.addView(hoennBtn)
+        topPill.addView(subRow)
 
-        addView(controlsBar)
-
-        // 3. Interactive Map Canvas (Middle, weighted 1.0f)
-        regionMapView.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1.0f)
-        addView(regionMapView)
-
-        // 4. Selected Location Detail Card (Bottom ScrollView)
-        val detailScroll = ScrollView(context).apply {
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(135))
-            setBackgroundColor(0xFF1E293B.toInt())
-            setPadding(dp(14), dp(8), dp(14), dp(8))
+        // 3. Bottom Floating Collapsible Detail Sheet
+        val bottomCard = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(0xF21E293B.toInt())
+                setStroke(dp(1), 0x99334155.toInt())
+            }
         }
-
-        val detailLayout = LinearLayout(context).apply {
-            orientation = VERTICAL
+        val bottomLp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.BOTTOM
+            setMargins(dp(8), 0, dp(8), dp(8))
         }
+        addView(bottomCard, bottomLp)
 
-        val nameRow = LinearLayout(context).apply {
-            orientation = HORIZONTAL
+        // Always-visible Header Row (tap to expand/collapse)
+        val headerRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(4), dp(2), dp(4), dp(2))
+            setOnClickListener {
+                toggleSheetExpansion()
+            }
         }
 
         detailNameView = TextView(context).apply {
@@ -185,9 +199,9 @@ class MapScreenView(
             setTextColor(0xFFF8FAFC.toInt())
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
-            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
+            layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
         }
-        nameRow.addView(detailNameView)
+        headerRow.addView(detailNameView)
 
         detailTypeBadgeView = TextView(context).apply {
             text = "Town"
@@ -200,16 +214,35 @@ class MapScreenView(
                 setColor(0xFF0F172A.toInt())
             }
         }
-        nameRow.addView(detailTypeBadgeView)
-        detailLayout.addView(nameRow)
+        val badgeLp = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, 0, dp(10), 0)
+        }
+        headerRow.addView(detailTypeBadgeView, badgeLp)
+
+        expandToggleView = TextView(context).apply {
+            text = "▲ Details"
+            setTextColor(0xFF38BDF8.toInt())
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+        }
+        headerRow.addView(expandToggleView)
+        bottomCard.addView(headerRow)
+
+        // Expandable Content Body (collapsed by default to save 90% of screen height)
+        expandableContent = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(dp(4), dp(6), dp(4), dp(2))
+        }
 
         detailDescView = TextView(context).apply {
             text = "The Town Where the Winds of a New Beginning Blow."
-            setTextColor(0xFF94A3B8.toInt())
+            setTextColor(0xFFCBD5E1.toInt())
             textSize = 11.5f
-            setPadding(0, dp(2), 0, dp(4))
+            setPadding(0, 0, 0, dp(4))
         }
-        detailLayout.addView(detailDescView)
+        expandableContent.addView(detailDescView)
 
         gymInfoView = TextView(context).apply {
             visibility = View.GONE
@@ -218,47 +251,67 @@ class MapScreenView(
             typeface = Typeface.DEFAULT_BOLD
             setPadding(0, 0, 0, dp(3))
         }
-        detailLayout.addView(gymInfoView)
+        expandableContent.addView(gymInfoView)
 
         poiContainer = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            setPadding(0, dp(2), 0, dp(4))
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(3))
         }
-        detailLayout.addView(poiContainer)
+        expandableContent.addView(poiContainer)
 
         connectionsView = TextView(context).apply {
-            setTextColor(0xFF64748B.toInt())
+            setTextColor(0xFF94A3B8.toInt())
             textSize = 10.5f
         }
-        detailLayout.addView(connectionsView)
+        expandableContent.addView(connectionsView)
 
-        detailScroll.addView(detailLayout)
-        addView(detailScroll)
+        bottomCard.addView(expandableContent)
 
         // Initial default display
         displaySectionDetails(RegionMapDatabase.JOHTO_DEFAULT)
     }
 
+    private fun toggleSheetExpansion() {
+        isSheetExpanded = !isSheetExpanded
+        expandableContent.visibility = if (isSheetExpanded) View.VISIBLE else View.GONE
+        expandToggleView.text = if (isSheetExpanded) "▼ Hide" else "▲ Details"
+    }
+
     private fun createRegionTabButton(title: String, region: RegionId): Button {
-        return Button(context).apply {
+        val btn = Button(context).apply {
             text = title
-            textSize = 10.5f
-            setTextColor(0xFFCBD5E1.toInt())
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(if (region == RegionId.JOHTO) Color.WHITE else 0xFF94A3B8.toInt())
             background = GradientDrawable().apply {
                 cornerRadius = dp(6).toFloat()
-                setColor(0xFF1E293B.toInt())
+                setColor(if (region == RegionId.JOHTO) 0xFF2563EB.toInt() else 0xFF1E293B.toInt())
             }
-            setPadding(dp(8), dp(2), dp(8), dp(2))
-            val lp = LayoutParams(LayoutParams.WRAP_CONTENT, dp(30)).apply {
+            setPadding(dp(6), dp(1), dp(6), dp(1))
+            val lp = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(26)).apply {
                 setMargins(dp(3), 0, 0, 0)
             }
             layoutParams = lp
             setOnClickListener {
                 regionMapView.currentRegion = region
+                updateRegionTabStyles(region)
                 val firstSec = RegionMapDatabase.getSections(region).firstOrNull()
                 if (firstSec != null) {
                     displaySectionDetails(firstSec)
                 }
+            }
+        }
+        regionButtons[region] = btn
+        return btn
+    }
+
+    private fun updateRegionTabStyles(activeRegion: RegionId) {
+        regionButtons.forEach { (reg, btn) ->
+            val isAct = (reg == activeRegion)
+            btn.setTextColor(if (isAct) Color.WHITE else 0xFF94A3B8.toInt())
+            btn.background = GradientDrawable().apply {
+                cornerRadius = dp(6).toFloat()
+                setColor(if (isAct) 0xFF2563EB.toInt() else 0xFF1E293B.toInt())
             }
         }
     }
@@ -302,6 +355,7 @@ class MapScreenView(
             else -> RegionId.JOHTO
         }
         regionMapView.currentRegion = region
+        updateRegionTabStyles(region)
         updatePlayerLocation(viewModel.playerLocation.value)
     }
 

@@ -8,18 +8,24 @@ import android.view.Gravity
 import android.widget.*
 import com.dualdex.calculator.*
 import com.dualdex.companion.CompanionViewModel
+import com.dualdex.pokemon.ItemDatabase
 import com.dualdex.pokemon.MoveDatabase
 import com.dualdex.pokemon.SpeciesDatabase
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 
 class CalcTabScreenView(
     context: Context,
     private val viewModel: CompanionViewModel
 ) : LinearLayout(context) {
 
+    private val liveBadgeView: TextView
     private val resultTextView: TextView
     private val movesContainer: LinearLayout
     private val attackerHeaderView: TextView
+    private val attackerStatView: TextView
     private val defenderHeaderView: TextView
+    private val defenderStatView: TextView
     private val defenderAutoInput: AutoCompleteTextView
     private val weatherSpinner: Spinner
     private val critCheckBox: CheckBox
@@ -31,6 +37,8 @@ class CalcTabScreenView(
     private var isCrit: Boolean = false
     private var hasScreens: Boolean = false
 
+    private var viewScope: CoroutineScope? = null
+
     init {
         orientation = VERTICAL
         setBackgroundColor(0xFF121216.toInt())
@@ -41,31 +49,65 @@ class CalcTabScreenView(
         scroll.addView(content)
         addView(scroll)
 
-        // Title
+        // Title Header with Live Battle Badge
+        val titleRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 14)
+        }
         val titleView = TextView(context).apply {
-            text = "⚔️ DualDex Damage Calculator"
+            text = "⚔️ Damage Calculator"
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, 14)
+            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
         }
-        content.addView(titleView)
+        titleRow.addView(titleView)
+
+        liveBadgeView = TextView(context).apply {
+            text = "Ready"
+            setTextColor(0xFF50C878.toInt())
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(16, 6, 16, 6)
+            background = GradientDrawable().apply {
+                cornerRadius = 12f
+                setColor(0xFF1E2B22.toInt())
+                setStroke(1, 0xFF50C878.toInt())
+            }
+        }
+        titleRow.addView(liveBadgeView)
+        content.addView(titleRow)
 
         // Attacker & Defender Header Card
         val matchupCard = createCardLayout().apply {
             attackerHeaderView = TextView(context).apply {
                 setTextColor(0xFF4A9EFF.toInt())
-                textSize = 15f
+                textSize = 15.5f
                 typeface = Typeface.DEFAULT_BOLD
+            }
+            attackerStatView = TextView(context).apply {
+                setTextColor(0xFF94A3B8.toInt())
+                textSize = 11.5f
+                setLineSpacing(3f, 1f)
+                setPadding(0, 2, 0, 8)
             }
             defenderHeaderView = TextView(context).apply {
                 setTextColor(0xFFFF6B6B.toInt())
-                textSize = 15f
+                textSize = 15.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 4, 0, 8)
+                setPadding(0, 4, 0, 2)
+            }
+            defenderStatView = TextView(context).apply {
+                setTextColor(0xFF94A3B8.toInt())
+                textSize = 11.5f
+                setLineSpacing(3f, 1f)
+                setPadding(0, 2, 0, 8)
             }
             addView(attackerHeaderView)
+            addView(attackerStatView)
             addView(defenderHeaderView)
+            addView(defenderStatView)
 
             // Defender Autocomplete Search Input
             val searchLabel = TextView(context).apply {
@@ -222,21 +264,79 @@ class CalcTabScreenView(
         refreshUI()
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewScope?.cancel()
+        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        viewScope = scope
+
+        scope.launch {
+            viewModel.enemyParty.collectLatest {
+                refreshUI()
+            }
+        }
+        scope.launch {
+            viewModel.isInBattle.collectLatest {
+                refreshUI()
+            }
+        }
+        scope.launch {
+            viewModel.playerParty.collectLatest {
+                refreshUI()
+            }
+        }
+        scope.launch {
+            viewModel.selectedMemberIndex.collectLatest {
+                refreshUI()
+            }
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        viewScope?.cancel()
+        viewScope = null
+    }
+
     fun refreshUI() {
         val party = viewModel.playerParty.value
         val selectedIdx = viewModel.selectedMemberIndex.value
         val attacker = if (party.isNotEmpty() && selectedIdx in party.indices) party[selectedIdx] else null
 
-        // Auto-populate defender from opponent memory read if in battle!
         val enemyParty = viewModel.enemyParty.value
         val inBattle = viewModel.isInBattle.value
+
+        if (inBattle) {
+            liveBadgeView.text = "⚔️ LIVE BATTLE"
+            liveBadgeView.setTextColor(0xFFFF6B6B.toInt())
+            liveBadgeView.background = GradientDrawable().apply {
+                cornerRadius = 12f
+                setColor(0xFF331A1A.toInt())
+                setStroke(1, 0xFFFF6B6B.toInt())
+            }
+        } else {
+            liveBadgeView.text = "Ready"
+            liveBadgeView.setTextColor(0xFF50C878.toInt())
+            liveBadgeView.background = GradientDrawable().apply {
+                cornerRadius = 12f
+                setColor(0xFF1E2B22.toInt())
+                setStroke(1, 0xFF50C878.toInt())
+            }
+        }
+
+        // Auto-populate defender from opponent memory read if in battle!
         if (inBattle && enemyParty.isNotEmpty()) {
             val enemyMon = enemyParty[0]
             val speciesName = SpeciesDatabase.get(enemyMon.species).name
             selectedDefenderSpecies = speciesName
             defenderHeaderView.text = "🔴 Defender (Opponent In-Battle): $selectedDefenderSpecies (Lv. ${enemyMon.level})"
+            defenderStatView.text = "📊 Live Opponent Stats:\n" +
+                    "   IVs: HP ${enemyMon.hpIv} | Atk ${enemyMon.attackIv} | Def ${enemyMon.defenseIv} | SpA ${enemyMon.spAttackIv} | SpD ${enemyMon.spDefenseIv} | Spe ${enemyMon.speedIv}\n" +
+                    "   EVs: HP ${enemyMon.hpEv} | Atk ${enemyMon.attackEv} | Def ${enemyMon.defenseEv} | SpA ${enemyMon.spAttackEv} | SpD ${enemyMon.spDefenseEv} | Spe ${enemyMon.speedEv}\n" +
+                    "   HP: ${enemyMon.currentHp}/${enemyMon.maxHp} | Nature: ${enemyMon.natureName}"
         } else {
             defenderHeaderView.text = "🔴 Defender: $selectedDefenderSpecies (Lv. 50)"
+            defenderStatView.text = "Target standard benchmark (Type above to search)"
         }
 
         val atkName = attacker?.let {
@@ -245,6 +345,14 @@ class CalcTabScreenView(
         val atkLevel = attacker?.level ?: 50
 
         attackerHeaderView.text = "🔵 Attacker: $atkName (Lv. $atkLevel)"
+        if (attacker != null) {
+            attackerStatView.text = "📊 Party Attacker Stats:\n" +
+                    "   IVs: HP ${attacker.hpIv} | Atk ${attacker.attackIv} | Def ${attacker.defenseIv} | SpA ${attacker.spAttackIv} | SpD ${attacker.spDefenseIv} | Spe ${attacker.speedIv}\n" +
+                    "   EVs: HP ${attacker.hpEv} | Atk ${attacker.attackEv} | Def ${attacker.defenseEv} | SpA ${attacker.spAttackEv} | SpD ${attacker.spDefenseEv} | Spe ${attacker.speedEv}\n" +
+                    "   HP: ${attacker.currentHp}/${attacker.maxHp} | Nature: ${attacker.natureName}"
+        } else {
+            attackerStatView.text = "Standard benchmark attacker"
+        }
 
         movesContainer.removeAllViews()
         val availableMoves = mutableListOf<String>()
@@ -299,18 +407,78 @@ class CalcTabScreenView(
             ?: "Salamence"
         val atkLevel = attacker?.level ?: 50
 
-        val req = DamageCalculationRequest(
-            gen = 3,
-            attacker = CalcPokemonInput(
-                species = atkSpecies,
-                level = atkLevel,
-                evs = StatBlock(atk = 252, spa = 252, spe = 252)
-            ),
-            defender = CalcPokemonInput(
+        val enemyParty = viewModel.enemyParty.value
+        val inBattle = viewModel.isInBattle.value
+        val enemyMon = if (inBattle && enemyParty.isNotEmpty()) enemyParty[0] else null
+
+        val defInput = if (enemyMon != null) {
+            CalcPokemonInput(
+                species = selectedDefenderSpecies,
+                level = enemyMon.level,
+                curHP = enemyMon.currentHp,
+                nature = enemyMon.natureName,
+                item = if (enemyMon.heldItem > 0) ItemDatabase.get(enemyMon.heldItem).name else null,
+                ivs = StatBlock(
+                    hp = enemyMon.hpIv,
+                    atk = enemyMon.attackIv,
+                    def = enemyMon.defenseIv,
+                    spa = enemyMon.spAttackIv,
+                    spd = enemyMon.spDefenseIv,
+                    spe = enemyMon.speedIv
+                ),
+                evs = StatBlock(
+                    hp = enemyMon.hpEv,
+                    atk = enemyMon.attackEv,
+                    def = enemyMon.defenseEv,
+                    spa = enemyMon.spAttackEv,
+                    spd = enemyMon.spDefenseEv,
+                    spe = enemyMon.speedEv
+                )
+            )
+        } else {
+            CalcPokemonInput(
                 species = selectedDefenderSpecies,
                 level = 50,
                 evs = StatBlock(hp = 252, def = 252, spd = 252)
-            ),
+            )
+        }
+
+        val atkInput = if (attacker != null) {
+            CalcPokemonInput(
+                species = atkSpecies,
+                level = atkLevel,
+                curHP = attacker.currentHp,
+                nature = attacker.natureName,
+                item = if (attacker.heldItem > 0) ItemDatabase.get(attacker.heldItem).name else null,
+                ivs = StatBlock(
+                    hp = attacker.hpIv,
+                    atk = attacker.attackIv,
+                    def = attacker.defenseIv,
+                    spa = attacker.spAttackIv,
+                    spd = attacker.spDefenseIv,
+                    spe = attacker.speedIv
+                ),
+                evs = StatBlock(
+                    hp = attacker.hpEv,
+                    atk = attacker.attackEv,
+                    def = attacker.defenseEv,
+                    spa = attacker.spAttackEv,
+                    spd = attacker.spDefenseEv,
+                    spe = attacker.speedEv
+                )
+            )
+        } else {
+            CalcPokemonInput(
+                species = atkSpecies,
+                level = atkLevel,
+                evs = StatBlock(atk = 252, spa = 252, spe = 252)
+            )
+        }
+
+        val req = DamageCalculationRequest(
+            gen = 3,
+            attacker = atkInput,
+            defender = defInput,
             move = CalcMoveInput(name = selectedMoveName, isCrit = isCrit),
             field = CalcFieldInput(
                 weather = currentWeather,

@@ -16,7 +16,8 @@ class SettingsScreenView(
     private val viewModel: CompanionViewModel,
     private val onShaderChanged: ((ShaderFilter) -> Unit)? = null,
     private val onSpeedChanged: ((Int) -> Unit)? = null,
-    private val onStretchChanged: ((Boolean) -> Unit)? = null
+    private val onStretchChanged: ((Boolean) -> Unit)? = null,
+    private val onTabSelected: ((com.dualdex.companion.CompanionTab) -> Unit)? = null
 ) : LinearLayout(context) {
 
     private val settingsManager = SettingsManager(context)
@@ -330,6 +331,7 @@ class SettingsScreenView(
                 setPadding(18, 8, 18, 8)
                 setOnClickListener {
                     viewModel.selectTab(com.dualdex.companion.CompanionTab.CHEATS)
+                    onTabSelected?.invoke(com.dualdex.companion.CompanionTab.CHEATS)
                 }
             }
             val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)

@@ -53,7 +53,18 @@ class CompanionScreenView(
     private val cheatsView: CheatsScreenView by lazy { CheatsScreenView(context, viewModel) }
     private val savesView: SaveStateScreenView by lazy { SaveStateScreenView(context, viewModel, onImportSaveRequested, onExportSaveRequested) }
     private val assistantView: com.dualdex.assistant.AssistantScreenView by lazy { com.dualdex.assistant.AssistantScreenView(context, viewModel) }
-    private val settingsView: SettingsScreenView by lazy { SettingsScreenView(context, viewModel, onShaderChanged, onSpeedChanged, onStretchChanged) }
+    private val settingsView: SettingsScreenView by lazy {
+        SettingsScreenView(
+            context,
+            viewModel,
+            onShaderChanged,
+            onSpeedChanged,
+            onStretchChanged,
+            onTabSelected = { tab ->
+                switchTab(tab)
+            }
+        )
+    }
 
     private val statusUpdateRunnable = object : Runnable {
         override fun run() {
@@ -193,7 +204,9 @@ class CompanionScreenView(
         switchTab(viewModel.selectedTab.value)
     }
 
+    private var currentTab: CompanionTab = CompanionTab.HOME
     fun switchTab(tab: CompanionTab) {
+        currentTab = tab
         contentContainer.removeAllViews()
 
         val activeView: View = when (tab) {
@@ -348,6 +361,13 @@ class CompanionScreenView(
         scope.launch {
             viewModel.isInBattle.collectLatest {
                 notifyPartyUpdated()
+            }
+        }
+        scope.launch {
+            viewModel.selectedTab.collectLatest { tab ->
+                if (currentTab != tab) {
+                    switchTab(tab)
+                }
             }
         }
     }

@@ -467,7 +467,29 @@ uint8_t pokemon_read_player_party(
     if (!ewram || !out_snapshot) return 0;
     memset(out_snapshot, 0, sizeof(PartySnapshot));
 
-    // 1. Try configured static offset first (fast path for vanilla games)
+    // 1. Try cached dynamically scanned offset FIRST (fast, reliable path for ROM hacks & vanilla)
+    if (s_cached_player_party_offset > 0 && s_cached_player_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
+        ParsedPokemon first_mon;
+        const uint8_t* mon_ptr = ewram + s_cached_player_party_offset;
+        if (pokemon_parse_single(mon_ptr, true, &first_mon) && first_mon.species > 0 && first_mon.species < 2000) {
+            uint8_t valid_count = 0;
+            out_snapshot->members[valid_count++] = first_mon;
+            for (uint8_t i = 1; i < 6; i++) {
+                const uint8_t* p = ewram + s_cached_player_party_offset + (i * sizeof(RawGbaPokemon));
+                if (pokemon_parse_single(p, true, &out_snapshot->members[valid_count])) {
+                    if (out_snapshot->members[valid_count].species > 0 && out_snapshot->members[valid_count].species < 2000) {
+                        valid_count++;
+                    } else break;
+                } else break;
+            }
+            out_snapshot->count = valid_count;
+            return valid_count;
+        } else {
+            s_cached_player_party_offset = 0;
+        }
+    }
+
+    // 2. Try configured static offset (fast fallback for vanilla games)
     if (config && config->player_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
         ParsedPokemon first_mon;
         const uint8_t* mon_ptr = ewram + config->player_party_offset;
@@ -497,6 +519,7 @@ uint8_t pokemon_read_player_party(
 
             if (count_verified && valid_count > 0) {
                 out_snapshot->count = valid_count;
+                s_cached_player_party_offset = (uint32_t)config->player_party_offset;
                 static int s_static_log_counter = 0;
                 if ((++s_static_log_counter % 30) == 1) {
                     LOG_PARTY("Static party offset 0x%X matched: count=%d, lead='%s', species=%d, lvl=%d",
@@ -504,28 +527,6 @@ uint8_t pokemon_read_player_party(
                 }
                 return valid_count;
             }
-        }
-    }
-
-    // 2. Try cached dynamically scanned offset
-    if (s_cached_player_party_offset > 0 && s_cached_player_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
-        ParsedPokemon first_mon;
-        const uint8_t* mon_ptr = ewram + s_cached_player_party_offset;
-        if (pokemon_parse_single(mon_ptr, true, &first_mon) && first_mon.species > 0 && first_mon.species < 2000) {
-            uint8_t valid_count = 0;
-            out_snapshot->members[valid_count++] = first_mon;
-            for (uint8_t i = 1; i < 6; i++) {
-                const uint8_t* p = ewram + s_cached_player_party_offset + (i * sizeof(RawGbaPokemon));
-                if (pokemon_parse_single(p, true, &out_snapshot->members[valid_count])) {
-                    if (out_snapshot->members[valid_count].species > 0 && out_snapshot->members[valid_count].species < 2000) {
-                        valid_count++;
-                    } else break;
-                } else break;
-            }
-            out_snapshot->count = valid_count;
-            return valid_count;
-        } else {
-            s_cached_player_party_offset = 0;
         }
     }
 
@@ -556,23 +557,6 @@ uint8_t pokemon_read_enemy_party(
         uint8_t count_byte = ewram[config->enemy_party_count_offset];
         if (count_byte == 0 || count_byte > 6) {
             return 0; // Not in battle
-        }
-    }
-
-    // In pokeemerald-expansion, gEnemyPartyCount is within [player_offset - 4 .. player_offset - 1]
-    // adjacent to gPlayerPartyCount. If all preceding bytes other than player_party_count are 0,
-    // then gEnemyPartyCount is 0 (outside battle).
-    if (s_cached_player_party_offset >= 4) {
-        bool has_active_battle_count = false;
-        for (int b = 1; b <= 4; b++) {
-            uint8_t val = ewram[s_cached_player_party_offset - b];
-            // An active battle enemy count is between 1 and 6
-            if (val >= 1 && val <= 6) {
-                has_active_battle_count = true;
-            }
-        }
-        if (!has_active_battle_count) {
-            return 0; // Preceding EWRAM header confirms 0 enemy party count
         }
     }
 

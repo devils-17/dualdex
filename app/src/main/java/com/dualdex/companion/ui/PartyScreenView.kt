@@ -12,6 +12,8 @@ import android.view.ViewConfiguration
 import android.widget.*
 import com.dualdex.companion.CompanionViewModel
 import com.dualdex.pokemon.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 
 class PartyScreenView(
     context: Context,
@@ -28,6 +30,11 @@ class PartyScreenView(
     private val detailContainer: LinearLayout
     private val chipHolders = ArrayList<ChipHolder>()
     private var lastSelectedIdx = -1
+    private var lastRenderedPid: Long = -1L
+    private var detailHpLabel: TextView? = null
+    private var detailLevelLabel: TextView? = null
+
+    private var viewScope: CoroutineScope? = null
 
     private val density = context.resources.displayMetrics.density
     private fun dp(v: Int): Int = (v * density).toInt()
@@ -36,12 +43,41 @@ class PartyScreenView(
         orientation = VERTICAL
         setBackgroundColor(0xFF121216.toInt()) // Deep modern dark theme
 
+        // Live status header
+        val topStatusBar = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(2))
+        }
+        val screenTitle = TextView(context).apply {
+            text = "👥 Active Party"
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+        val liveSyncBadge = TextView(context).apply {
+            text = "● LIVE SYNC"
+            setTextColor(0xFF50C878.toInt())
+            textSize = 10.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(8), dp(3), dp(8), dp(3))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(0xFF1E2B22.toInt())
+                setStroke(1, 0xFF50C878.toInt())
+            }
+        }
+        topStatusBar.addView(screenTitle)
+        topStatusBar.addView(liveSyncBadge)
+        addView(topStatusBar)
+
         // Top horizontal party member selector
         val horizontalScroll = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             clipToPadding = false
             clipChildren = false
-            setPadding(dp(12), dp(10), dp(12), dp(8))
+            setPadding(dp(12), dp(6), dp(12), dp(8))
         }
         memberSelectorLayout = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -63,6 +99,35 @@ class PartyScreenView(
         addView(verticalScroll)
 
         refreshUI()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewScope?.cancel()
+        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        viewScope = scope
+
+        scope.launch {
+            viewModel.playerParty.collectLatest {
+                refreshUI()
+            }
+        }
+        scope.launch {
+            viewModel.selectedMemberIndex.collectLatest {
+                refreshUI()
+            }
+        }
+        scope.launch {
+            viewModel.isInBattle.collectLatest {
+                refreshUI()
+            }
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        viewScope?.cancel()
+        viewScope = null
     }
 
     fun refreshUI() {
@@ -217,8 +282,11 @@ class PartyScreenView(
     }
 
     private fun updateDetailCard(party: List<ParsedPokemon>, selectedIdx: Int, gameId: Int) {
-        detailContainer.removeAllViews()
         if (party.isEmpty()) {
+            lastRenderedPid = -1L
+            detailHpLabel = null
+            detailLevelLabel = null
+            detailContainer.removeAllViews()
             val emptyMsg = TextView(context).apply {
                 text = "=== DualDex Party Monitor ===\n\nWaiting for game to load.\nOnce loaded, live Pokémon stats, IVs, EVs, and matchups will appear here in real-time."
                 setTextColor(0xFFAAAAAA.toInt())
@@ -232,6 +300,18 @@ class PartyScreenView(
 
         val safeIdx = if (selectedIdx in party.indices) selectedIdx else 0
         val mon = party[safeIdx]
+
+        // Smooth in-place update if the exact same Pokémon is already displayed
+        if (mon.pid == lastRenderedPid && detailContainer.childCount > 0 && detailHpLabel != null && detailLevelLabel != null) {
+            detailHpLabel?.text = "HP: ${mon.currentHp} / ${mon.maxHp}"
+            detailHpLabel?.setTextColor(getHpColor(mon.currentHp, mon.maxHp))
+            detailLevelLabel?.text = "  Lv. ${mon.level}"
+            return
+        }
+
+        lastRenderedPid = mon.pid
+        detailContainer.removeAllViews()
+
         val speciesInfo = SpeciesDatabase.get(mon.species)
         val natureInfo = NatureTable.get(mon.nature)
         val isGhostGrey = (gameId == 6) // GAME_GHOST_GREY
@@ -256,6 +336,7 @@ class PartyScreenView(
                 textSize = 20f
                 typeface = Typeface.DEFAULT_BOLD
             }
+            detailLevelLabel = levelText
             titleRow.addView(titleText)
             titleRow.addView(levelText)
             addView(titleRow)
@@ -281,6 +362,7 @@ class PartyScreenView(
                 textSize = 15f
                 typeface = Typeface.DEFAULT_BOLD
             }
+            detailHpLabel = hpLabel
             hpRow.addView(hpLabel)
             addView(hpRow)
 

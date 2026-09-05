@@ -154,6 +154,19 @@ class RegionMapView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
     }
 
+    private val textBgPaint = Paint().apply {
+        color = 0xDE0B132B.toInt()
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
+    private val textStrokePaint = Paint().apply {
+        color = 0x8838BDF8.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f
+        isAntiAlias = true
+    }
+
     // Touch & Gesture Detection
     private var lastTouchX = 0f
     private var lastTouchY = 0f
@@ -354,6 +367,9 @@ class RegionMapView @JvmOverloads constructor(
         // 6. Draw Live Player Marker (Layer 3)
         drawPlayerMarker(canvas, startX, startY, tileSize)
 
+        // 7. Draw Clean Uncluttered Location Labels (Layer 4)
+        drawLocationLabels(canvas, startX, startY, tileSize)
+
         canvas.restore()
 
         // Keep radar pulse animating smoothly
@@ -391,14 +407,66 @@ class RegionMapView @JvmOverloads constructor(
 
         canvas.drawRoundRect(tempRect, radius, radius, paint)
         canvas.drawRoundRect(tempRect, radius, radius, nodeStrokePaint)
+    }
 
-        // Draw node title if zoomed in or city
-        if (scaleFactor >= 1.2f || sec.nodeType == MapNodeType.CITY) {
-            val text = sec.name.replace(" City", "").replace(" Town", "")
-            val tw = textPaint.measureText(text)
-            val cx = tempRect.centerX()
-            val textY = tempRect.top - 6f
-            canvas.drawText(text, cx - tw / 2f, textY, textPaint)
+    private fun drawLocationLabels(canvas: Canvas, startX: Float, startY: Float, tileSize: Float) {
+        val density = context.resources.displayMetrics.density
+        val baseFontSize = 11.5f * density
+        // Prevent font from growing too large on zoom; keep it around 8-13sp in visual screen coordinates
+        textPaint.textSize = (baseFontSize / scaleFactor).coerceIn(7.5f * density, 13f * density)
+
+        val sel = selectedSection
+
+        sections.forEach { sec ->
+            val isSelected = (sel?.name == sec.name)
+            val isCity = (sec.nodeType == MapNodeType.CITY)
+            val isTown = (sec.nodeType == MapNodeType.TOWN)
+
+            // Show label if:
+            // 1. It is selected (always)
+            // 2. It is a Major City (if scaleFactor >= 0.9f)
+            // 3. It is a Town (if scaleFactor >= 1.4f)
+            val shouldShow = isSelected || (isCity && scaleFactor >= 0.9f) || (isTown && scaleFactor >= 1.4f)
+            if (!shouldShow) return@forEach
+
+            val l = startX + sec.gridX * tileSize + 3f
+            val t = startY + sec.gridY * tileSize + 3f
+            val r = l + sec.width * tileSize - 6f
+            val cx = (l + r) / 2f
+            val topY = t
+
+            val text = if (isSelected) sec.name else sec.name.replace(" City", "").replace(" Town", "")
+            val textWidth = textPaint.measureText(text)
+            val padH = 6f / scaleFactor * density
+            val padV = 3f / scaleFactor * density
+            val badgeW = textWidth + padH * 2f
+
+            val fontMetrics = textPaint.fontMetrics
+            val textH = fontMetrics.descent - fontMetrics.ascent
+            val badgeH = textH + padV * 2f
+
+            val badgeL = cx - badgeW / 2f
+            val badgeB = topY - (4f / scaleFactor * density)
+            val badgeT = badgeB - badgeH
+            tempRect.set(badgeL, badgeT, badgeL + badgeW, badgeB)
+
+            val radius = 4f / scaleFactor * density
+            textBgPaint.color = if (isSelected) 0xF21E293B.toInt() else 0xD00F172A.toInt()
+            canvas.drawRoundRect(tempRect, radius, radius, textBgPaint)
+
+            if (isSelected) {
+                textStrokePaint.color = 0xFFFFD700.toInt()
+                textStrokePaint.strokeWidth = 1.8f / scaleFactor * density
+                canvas.drawRoundRect(tempRect, radius, radius, textStrokePaint)
+            } else if (isCity) {
+                textStrokePaint.color = 0x6638BDF8.toInt()
+                textStrokePaint.strokeWidth = 1.0f / scaleFactor * density
+                canvas.drawRoundRect(tempRect, radius, radius, textStrokePaint)
+            }
+
+            val textBaseline = badgeT + padV - fontMetrics.ascent
+            textPaint.color = if (isSelected) 0xFFFFD700.toInt() else Color.WHITE
+            canvas.drawText(text, cx, textBaseline, textPaint)
         }
     }
 

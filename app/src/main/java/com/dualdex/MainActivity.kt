@@ -3,12 +3,19 @@ package com.dualdex
 import android.content.Context
 import android.content.Intent
 import android.hardware.display.DisplayManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.Display
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -46,8 +53,12 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
     private var companionPresentation: CompanionPresentation? = null
     private var currentCompanionScreenView: CompanionScreenView? = null
     private var displayManager: DisplayManager? = null
+    private var restoreBottomScreenBtn: TextView? = null
     private var loadedProfiles: List<RomHackProfile> = emptyList()
     private val audioDriver = AudioDriver(32768)
+
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
 
     private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -292,14 +303,62 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
             // Dual-screen mode (AYN Thor detected)
             Log.i("DualDex", "AYN Thor dual-screen detected. Attaching CompanionPresentation to Display 1.")
 
-            emulatorView = EmulatorSurfaceView(this).apply {
+            val topRoot = FrameLayout(this).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
+            }
+
+            val emu = emulatorView ?: EmulatorSurfaceView(this).apply {
                 setStretchToFit(settingsManager.isStretchToFitEnabled)
             }
-            setContentView(emulatorView)
+            emulatorView = emu
+            (emu.parent as? ViewGroup)?.removeView(emu)
+            emu.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            topRoot.addView(emu)
+
+            val restoreBtn = TextView(this).apply {
+                text = "📱 Restore Companion"
+                setTextColor(Color.WHITE)
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(dpToPx(12), dpToPx(6), dpToPx(12), dpToPx(6))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#D9121624"))
+                    cornerRadius = dpToPx(16).toFloat()
+                    setStroke(dpToPx(1), Color.parseColor("#806366F1"))
+                }
+                elevation = dpToPx(8).toFloat()
+                visibility = if (companionPresentation?.isShowing == true) View.GONE else View.VISIBLE
+                val lp = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.END
+                    topMargin = dpToPx(14)
+                    marginEnd = dpToPx(14)
+                }
+                layoutParams = lp
+                setOnClickListener {
+                    val displays = try {
+                        displayManager?.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+                    } catch (e: Throwable) { emptyArray() }
+                    if (!displays.isNullOrEmpty()) {
+                        showPresentation(displays[0])
+                        Toast.makeText(this@MainActivity, "Restored companion screen", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Secondary display not found", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            restoreBottomScreenBtn = restoreBtn
+            topRoot.addView(restoreBtn)
+
+            setContentView(topRoot)
 
             showPresentation(presentationDisplays[0])
         } else {
@@ -309,6 +368,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
 
     private fun setupSplitScreen() {
         Log.i("DualDex", "Running in split-screen fallback mode.")
+        restoreBottomScreenBtn?.visibility = View.GONE
         val splitLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = ViewGroup.LayoutParams(
@@ -317,15 +377,17 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
             )
         }
 
-        emulatorView = EmulatorSurfaceView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1.0f
-            )
+        val emu = emulatorView ?: EmulatorSurfaceView(this).apply {
             setStretchToFit(settingsManager.isStretchToFitEnabled)
         }
-        splitLayout.addView(emulatorView)
+        emulatorView = emu
+        (emu.parent as? ViewGroup)?.removeView(emu)
+        emu.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            0,
+            1.0f
+        )
+        splitLayout.addView(emu)
 
         val companionView = CompanionScreenView(
             context = this,
@@ -397,10 +459,17 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                     emulatorView?.setStretchToFit(stretch)
                 }
             ).apply {
+                setOnDismissListener {
+                    runOnUiThread {
+                        restoreBottomScreenBtn?.visibility = View.VISIBLE
+                    }
+                }
                 show()
             }
+            restoreBottomScreenBtn?.visibility = View.GONE
         } catch (e: Throwable) {
             Log.e("DualDex", "Error showing CompanionPresentation: ${e.message}, falling back to split screen", e)
+            restoreBottomScreenBtn?.visibility = View.VISIBLE
             setupSplitScreen()
         }
     }
@@ -417,7 +486,18 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
         }
     }
 
-    override fun onDisplayChanged(displayId: Int) {}
+    override fun onDisplayChanged(displayId: Int) {
+        val presentationDisplays = try {
+            displayManager?.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        } catch (e: Throwable) { emptyArray() }
+        if (!presentationDisplays.isNullOrEmpty()) {
+            if (companionPresentation?.isShowing != true) {
+                runOnUiThread {
+                    restoreBottomScreenBtn?.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
 
     override fun onPause() {
         super.onPause()
@@ -436,6 +516,17 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
         LibretroHost.nativeClearAudio()
         emulatorView?.onResume()
         audioDriver.start()
+
+        val presentationDisplays = try {
+            displayManager?.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        } catch (e: Throwable) { emptyArray() }
+        if (!presentationDisplays.isNullOrEmpty()) {
+            if (companionPresentation?.isShowing != true) {
+                restoreBottomScreenBtn?.visibility = View.VISIBLE
+            } else {
+                restoreBottomScreenBtn?.visibility = View.GONE
+            }
+        }
     }
 
     override fun onDestroy() {
