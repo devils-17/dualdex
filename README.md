@@ -1,136 +1,169 @@
-# DualDex ⚡
+# DualDex
 
-**DualDex** is an open-source, dual-screen Game Boy Advance emulator and real-time companion application built specifically for the **AYN Thor** handheld running Android.
+DualDex is an open-source Android GBA emulator and live Pokémon companion built primarily for the **AYN Thor** dual-screen handheld.
 
-By utilizing the AYN Thor's secondary $3.92''$ $1240 \times 1080$ AMOLED display, DualDex turns the bottom screen into a live companion Pokédex, battle calculator, type matchup engine, and AI assistant—all synchronized in real time with the running GBA game via direct memory reading.
+The project started from a pretty simple idea: if the Thor already has a second screen, it should be doing something useful while you play. The top display runs the game, while the bottom display can show live party information, battle tools, damage calculations, documentation, saves, and other game-specific companion features.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                 TOP SCREEN: 6.0" AMOLED (1920x1080)         │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │                                                       │  │
-│  │            mGBA Emulation (3:2 Native Ratio)          │  │
-│  │            Retro Shaders: CRT / LCD / Sharp Bilinear  │  │
-│  │                                                       │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                               ▲
-                 Shared Memory │ (Zero-Copy EWRAM Polling)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│               BOTTOM SCREEN: 3.92" AMOLED (1240x1080)        │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │  👥 Party  │  ⚔️ Calc  │  🛡️ Types  │  📖 Docs  │  🤖 LLM │  │
-│  │───────────────────────────────────────────────────────│  │
-│  │  🔥 Blaziken Lv.67 ♂              HP: 198/214 ███████ │  │
-│  │  Nature: Adamant (+Atk, -SpA)     Item: Life Orb      │  │
-│  │  IVs: 31/31/28/31/14/31           EVs: 4/252/0/252/0/0│  │
-│  │  Known Moves: Flare Blitz, Close Combat, Swords Dance │  │
-│  │  ⚠️ Weak: Water, Ground, Flying, Psychic (2x)         │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
+DualDex reads game state directly from the emulator for supported ROM profiles, so information like your party or current opponent can be pulled into the companion without having to enter everything by hand.
 
----
+> **Project status:** DualDex is currently being prepared for its first public beta. The main focus right now is save safety, ROM/version detection, battle-state accuracy, calculator correctness, controller behavior, and release infrastructure. Expect rough edges until the beta checklist is complete.
 
-## ✨ Features
+See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the current release plan and the [open issues](https://github.com/devils-17/dualdex/issues) for known bugs and engineering work.
 
-- **🎮 mGBA Emulation Core**:
-  - Embedded `mgba_libretro.so` cross-compiled for `arm64-v8a` (AYN Thor) and `x86_64`.
-  - OpenGL ES 2.0 textured quad with exact GBA $3:2$ pixel aspect ratio correction.
-  - Low-latency $32,768\text{ Hz}$ stereo audio streaming via Android `AudioTrack`.
-  - Fast-forward speed toggle ($1\times, 2\times, 3\times, 4\times$).
+## What DualDex does
 
-- **📺 Retro Display Shaders**:
-  - **Pixel Perfect (Nearest)**: Crisp 1:1 raw pixel art.
-  - **Sharp Bilinear**: Smooth, integer-scale pixel boundary anti-aliasing.
-  - **GBA LCD Grid**: Authentic Game Boy Advance TFT LCD subpixel matrix simulation.
-  - **CRT Scanlines**: Retro phosphor scanline darkening.
+### GBA emulation
 
-- **🧠 Real-Time Gen 3 Memory Parser**:
-  - Zero-copy EWRAM pointer extraction (`retro_get_memory_data()`).
-  - Native C Gen 3 decryption (`PID ^ OTID` XOR key) and 24-permutation substructure unscrambling.
-  - 16-bit checksum verification to prevent flickering during battle transitions.
-  - Live $10\text{Hz}$ background polling loop reading both player party and active in-battle opponent.
+DualDex uses an embedded **mGBA libretro core** for Game Boy Advance emulation.
 
-- **📱 Adaptive Companion UI (Bottom Screen)**:
-  - **Ghost Grey Mode**: Automatically hides IVs and EVs, displays flat base stats, and applies pre-Gen 6 Steel type chart overrides (Steel resisting Ghost and Dark).
-  - **Radical Red / Vanilla Mode**: Shows exact 0–31 IVs, 0–252 EVs, and total EV counters.
-  - **Type Matchup Matrix**: 18-type dual-typing defense breakdown ($4\times, 2\times, 0.5\times, 0.25\times, 0\times$).
-  - **Save State Manager**: 5 multi-slot save states with timestamps, quicksave/quickload, and auto-save on pause.
+Current emulator features include:
 
-- **⚔️ Embedded Damage Calculator**:
-  - Full `@smogon/calc` engine embedded via native **QuickJS-NG** C runtime.
-  - Sub-millisecond calculation ($< 0.8\text{ms}$) with zero network dependencies.
-  - Defender search with autocomplete, field conditions (Sun, Rain, Sand, Hail, Reflect, Light Screen, Critical Hits), and automatic defender pre-fill when an opponent Pokémon appears in battle.
+- Android `arm64-v8a` support for the AYN Thor, plus `x86_64` builds for development/testing
+- OpenGL ES rendering
+- Pixel-perfect, sharp bilinear, LCD-grid, and CRT-style display options
+- Audio through Android `AudioTrack`
+- Fast-forward support
+- Battery saves and save states
+- ROM loading from Android storage
+- Battery-save import/export support
 
-- **🤖 ROM Hack Assistant (Gemini LLM + Google Search Grounding)**:
-  - Integrated with **Google Gemini 2.5 Flash** with live **Google Search Grounding**.
-  - Injects active ROM title, base game, engine rules, and current party composition into prompt.
-  - Clickable citation links (`[🔗 PokeCommunity]`, `[🔗 Reddit]`) for Google API TOS compliance.
-  - Built-in smart offline knowledge base for item locations (Fly, Surf, Exp Share) and Ghost Grey custom regional evolutions (*Lichtoise*, *Spectrasaur*, *Phantomander*).
+The emulator runs on the Thor's main display while the companion UI is presented on the second display.
 
----
+### Live Pokémon companion
 
-## 🎮 AYN Thor Physical Controller Mapping
+For recognized and supported game profiles, DualDex can read Pokémon data directly from emulated memory and surface it in the companion UI.
 
-| Handheld Control | DualDex Function |
-|---|---|
-| **D-Pad / Left Stick** | GBA Directional Movement |
-| **Button A** | GBA Button A (Confirm / Talk) |
-| **Button B** | GBA Button B (Cancel / Run) |
-| **Button X / Y** | Menu Shortcut / Fast-Forward Toggle |
-| **L1 / R1** | GBA Left / Right Shoulder Triggers |
-| **L2 / R2** | Quick Save State (L2) / Quick Load State (R2) |
-| **Start / Select** | GBA Start / Select Buttons |
-| **Bottom Screen Touch** | Navigate companion tabs, tap moves to calculate, search Pokémon |
+Depending on the game/profile, that can include:
 
----
+- Current party
+- Levels, moves, HP, stats, IVs, and EVs where applicable
+- Active battle opponent
+- Type matchups
+- Location/map information
+- Automatic calculator attacker/defender data
+- ROM-specific mechanics and custom species data
 
-## 📦 Supported ROM Hacks
+One of the current beta-hardening goals is making sure DualDex never shows confident-looking live data when the exact ROM layout has not been verified. Unsupported or unverified games should still be playable as normal GBA games without unsafe companion parsing.
 
-| Hack | Base Game | Engine | EV / IV Support | Custom Features |
-|---|---|---|---|---|
-| **Pokemon Ghost Grey** | FireRed v1.0 | HexManiacAdvance | Flat Stats (No EVs/IVs) | Steel resists Ghost/Dark, 120+ regional species |
-| **Pokemon Radical Red** | FireRed v1.0 | CFRU | Full EVs & IVs | Gen 9 split, Mega Evolutions, `dex.radicalred.net` docs |
-| **Vanilla FireRed** | FireRed v1.0 | Vanilla | Full EVs & IVs | Standard Gen 3 rules |
-| **Vanilla Emerald** | Emerald v1.0 | Vanilla | Full EVs & IVs | Standard Gen 3 rules |
+### Damage calculator
 
----
+DualDex embeds `@smogon/calc` locally through QuickJS-NG. Calculations run on-device and do not require a network connection.
 
-## 🛠️ Building & Running
+The calculator can use live party and opponent data when that information is available from the active game profile. It also supports common field settings such as weather, screens, and critical hits.
+
+ROM hacks can change a lot more than species names, so calculator behavior is being moved toward explicit per-game/version rules rather than assuming every GBA Pokémon game follows vanilla Gen 3 mechanics.
+
+### Companion tools
+
+The bottom-screen companion currently includes tools for things such as:
+
+- Party information
+- Damage calculations
+- Type matchups
+- Map/location data
+- Save management
+- Game documentation
+- Optional Gemini-powered assistance
+- Settings and emulator options
+
+The Assistant is optional and is not required for emulation, live party reading, calculations, or the other local companion features.
+
+## ROM profiles
+
+DualDex currently includes profiles for:
+
+- Pokémon FireRed
+- Pokémon Emerald
+- Pokémon Ghost Grey
+- Pokémon Radical Red
+- Pokémon Heart & Soul
+
+Profile presence does **not** currently mean every release of that game or hack is fully verified. Exact-version detection, memory-layout validation, and per-hack calculator accuracy are part of the work being completed before the public beta.
+
+The long-term goal is to clearly distinguish between:
+
+- **Verified** — exact game/version is tested and supported
+- **Recognized / Unverified** — DualDex recognizes the game, but the exact build is not confirmed
+- **Unsupported** — emulation works, but live companion features are disabled
+
+## Controls
+
+Standard GBA controls are mapped to the AYN Thor's physical controls, including the D-pad/sticks, A/B, L/R, Start, and Select.
+
+DualDex also has plans for app-level controller shortcuts such as quick save, quick load, fast-forward, and companion navigation. Those shortcuts are still part of the current beta-hardening work and should not be considered final until the first public release.
+
+The companion itself can be controlled through the Thor's bottom touchscreen.
+
+## Building DualDex
 
 ### Requirements
+
 - Android SDK Platform 34 (`android-34`)
 - Android NDK `27.2.12479018`
 - CMake `3.22.1`
 - OpenJDK 17
 
-### Build Commands
+### Clone and build
+
 ```bash
-# Clone repository
-git clone https://github.com/dualdex/dualdex.git
+git clone https://github.com/devils-17/dualdex.git
 cd dualdex
 
-# Run native C memory parser and damage calc test suites
-gcc -O2 -I native/include native/src/pokemon_reader.c native/src/pokemon_text.c native/tests/test_pokemon_reader.c -o native/test_runner && ./native/test_runner
-
-# Run Kotlin unit tests
 ./gradlew testDebugUnitTest
-
-# Assemble Debug APK (outputs to app/build/outputs/apk/debug/app-debug.apk)
 ./gradlew assembleDebug
 ```
 
----
+The debug APK is written to:
 
-## 📚 Documentation
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Technical deep-dive on Libretro host, zero-copy memory access, and QuickJS integration.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Step-by-step guide to adding new ROM hack JSON profiles.
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
 
----
+### Native parser tests
 
-## 📄 License
+```bash
+gcc -O2 \
+  -I native/include \
+  native/src/pokemon_reader.c \
+  native/src/pokemon_text.c \
+  native/tests/test_pokemon_reader.c \
+  -o native/test_runner
 
-DualDex is licensed under the [MIT License](LICENSE).  
-The mGBA Libretro core is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](https://www.mozilla.org/MPL/2.0/).
+./native/test_runner
+```
+
+## ROMs, saves, and game files
+
+DualDex does not include Pokémon ROMs, BIOS files, or other commercial game data. You are responsible for supplying your own legally obtained game files.
+
+Because DualDex is still pre-beta, keep external backups of any save files you care about. Save safety and recovery are release blockers for the first public beta.
+
+## Project roadmap
+
+The immediate goal is a stable **AYN Thor GBA beta**. Broader Android layouts and additional systems come later.
+
+- [Public beta release checklist](RELEASE_CHECKLIST.md)
+- [UI design audit](UI_DESIGN_AUDIT.md)
+- [Future platform roadmap](FUTURE_PLATFORM_ROADMAP.md)
+- [Post-beta Enhanced Battle Console](POST_BETA_ENHANCED_BATTLE_CONSOLE.md)
+
+Long term, the goal is to make DualDex a multi-generation Pokémon companion platform rather than keeping it permanently tied to GBA. That work is intentionally separated from the current beta so it does not turn into feature creep before the first release.
+
+## Technical documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — current emulator, native-memory, rendering, and companion architecture
+- [CONTRIBUTING.md](CONTRIBUTING.md) — information for contributing code and ROM profiles
+
+## Contributing
+
+DualDex is still early, so bug reports and testing feedback are useful, especially around save behavior, ROM compatibility, battle tracking, and AYN Thor hardware behavior.
+
+If you're reporting a ROM-hack compatibility issue, include the exact hack version whenever possible. Do not upload ROM files to GitHub issues.
+
+## License
+
+DualDex is licensed under the [MIT License](LICENSE).
+
+The bundled mGBA libretro core is licensed separately under the [Mozilla Public License 2.0](https://www.mozilla.org/MPL/2.0/). Additional third-party notices and dependency provenance are being prepared as part of the public release process.
+
+DualDex is an independent open-source project and is not affiliated with Nintendo, The Pokémon Company, Game Freak, AYN, or individual ROM-hack authors.
