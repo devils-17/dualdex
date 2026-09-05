@@ -8,9 +8,7 @@ import android.view.Gravity
 import android.widget.*
 import com.dualdex.calculator.*
 import com.dualdex.companion.CompanionViewModel
-import com.dualdex.pokemon.ItemDatabase
-import com.dualdex.pokemon.MoveDatabase
-import com.dualdex.pokemon.SpeciesDatabase
+import com.dualdex.pokemon.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 
@@ -22,6 +20,7 @@ class CalcTabScreenView(
     private val liveBadgeView: TextView
     private val resultTextView: TextView
     private val movesContainer: LinearLayout
+    private val partySelectorContainer: LinearLayout
     private val attackerHeaderView: TextView
     private val attackerStatView: TextView
     private val defenderHeaderView: TextView
@@ -38,6 +37,16 @@ class CalcTabScreenView(
     private var hasScreens: Boolean = false
 
     private var viewScope: CoroutineScope? = null
+
+    private fun getHpColor(currentHp: Int, maxHp: Int): Int {
+        if (maxHp <= 0) return 0xFF888888.toInt()
+        val pct = currentHp.toFloat() / maxHp.toFloat()
+        return when {
+            pct > 0.5f -> 0xFF50C878.toInt()
+            pct > 0.2f -> 0xFFFFD700.toInt()
+            else -> 0xFFFF6B6B.toInt()
+        }
+    }
 
     init {
         orientation = VERTICAL
@@ -81,6 +90,25 @@ class CalcTabScreenView(
 
         // Attacker & Defender Header Card
         val matchupCard = createCardLayout().apply {
+            val partySwitchLabel = TextView(context).apply {
+                text = "Switch Attacker from Party:"
+                setTextColor(0xFFAAAAAA.toInt())
+                textSize = 12f
+                setPadding(0, 0, 0, 4)
+            }
+            addView(partySwitchLabel)
+
+            val partyScroll = HorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
+                clipToPadding = false
+                setPadding(0, 0, 0, 10)
+            }
+            partySelectorContainer = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+            }
+            partyScroll.addView(partySelectorContainer)
+            addView(partyScroll)
+
             attackerHeaderView = TextView(context).apply {
                 setTextColor(0xFF4A9EFF.toInt())
                 textSize = 15.5f
@@ -324,11 +352,56 @@ class CalcTabScreenView(
             }
         }
 
-        // Auto-populate defender from opponent memory read if in battle!
+        // 1. Populate party member chips for instant attacker switching directly in Calc
+        partySelectorContainer.removeAllViews()
+        if (party.isNotEmpty()) {
+            party.forEachIndexed { idx, mon ->
+                val isSelected = (idx == selectedIdx)
+                val chip = LinearLayout(context).apply {
+                    orientation = VERTICAL
+                    gravity = Gravity.CENTER
+                    setPadding(18, 8, 18, 8)
+                    background = GradientDrawable().apply {
+                        cornerRadius = 12f
+                        setColor(if (isSelected) 0xFF2E3A59.toInt() else 0xFF181820.toInt())
+                        setStroke(if (isSelected) 2 else 1, if (isSelected) 0xFF4A9EFF.toInt() else 0xFF333344.toInt())
+                    }
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        viewModel.selectMember(idx)
+                        refreshUI()
+                    }
+                }
+                val monName = if (mon.nickname.isNotBlank()) mon.nickname else SpeciesDatabase.get(mon.species).name
+                val nameLabel = TextView(context).apply {
+                    text = "$monName (Lv.${mon.level})"
+                    setTextColor(if (isSelected) Color.WHITE else 0xFFAAAAAA.toInt())
+                    textSize = 12f
+                    typeface = if (isSelected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                }
+                val hpLabel = TextView(context).apply {
+                    text = "${mon.currentHp}/${mon.maxHp} HP"
+                    setTextColor(getHpColor(mon.currentHp, mon.maxHp))
+                    textSize = 10.5f
+                }
+                chip.addView(nameLabel)
+                chip.addView(hpLabel)
+                val lp = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, 0, 10, 0)
+                }
+                partySelectorContainer.addView(chip, lp)
+            }
+        }
+
+        // 2. Auto-populate defender from opponent memory read if in battle!
         if (inBattle && enemyParty.isNotEmpty()) {
             val enemyMon = enemyParty[0]
             val speciesName = SpeciesDatabase.get(enemyMon.species).name
             selectedDefenderSpecies = speciesName
+            if (defenderAutoInput.text.toString() != selectedDefenderSpecies) {
+                defenderAutoInput.setText(selectedDefenderSpecies, false)
+            }
             defenderHeaderView.text = "🔴 Defender (Opponent In-Battle): $selectedDefenderSpecies (Lv. ${enemyMon.level})"
             defenderStatView.text = "📊 Live Opponent Stats:\n" +
                     "   IVs: HP ${enemyMon.hpIv} | Atk ${enemyMon.attackIv} | Def ${enemyMon.defenseIv} | SpA ${enemyMon.spAttackIv} | SpD ${enemyMon.spDefenseIv} | Spe ${enemyMon.speedIv}\n" +
@@ -354,46 +427,70 @@ class CalcTabScreenView(
             attackerStatView.text = "Standard benchmark attacker"
         }
 
+        // 3. Attacker Moves (scrollable with power/type indicators)
         movesContainer.removeAllViews()
-        val availableMoves = mutableListOf<String>()
+        val availableMoves = mutableListOf<MoveInfo>()
         if (attacker != null) {
             attacker.moves.forEach { mId ->
                 if (mId > 0) {
                     val info = MoveDatabase.get(mId)
-                    availableMoves.add(info.name)
+                    availableMoves.add(info)
                 }
             }
         }
         if (availableMoves.isEmpty()) {
-            availableMoves.addAll(listOf("Rock Slide", "Earthquake", "Flamethrower", "Hydro Pump"))
+            listOf("Rock Slide", "Earthquake", "Flamethrower", "Hydro Pump").forEach {
+                MoveDatabase.getByName(it)?.let { m -> availableMoves.add(m) }
+            }
         }
 
+        val movesScroll = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+        }
         val btnRow = LinearLayout(context).apply { orientation = HORIZONTAL }
-        availableMoves.forEach { moveName ->
-            val isSelected = (moveName == selectedMoveName)
-            val moveBtn = Button(context).apply {
-                text = moveName
-                textSize = 12.5f
-                setTextColor(Color.WHITE)
+        availableMoves.forEach { moveInfo ->
+            val isSelected = (moveInfo.name == selectedMoveName)
+            val moveBtn = LinearLayout(context).apply {
+                orientation = VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(18, 10, 18, 10)
                 background = GradientDrawable().apply {
                     cornerRadius = 14f
                     setColor(if (isSelected) 0xFF4A9EFF.toInt() else 0xFF2B3A55.toInt())
+                    if (isSelected) setStroke(2, Color.WHITE)
                 }
-                setPadding(18, 8, 18, 8)
+                isClickable = true
+                isFocusable = true
                 setOnClickListener {
-                    selectedMoveName = moveName
+                    selectedMoveName = moveInfo.name
                     refreshUI()
                 }
             }
+            val titleView = TextView(context).apply {
+                text = moveInfo.name
+                textSize = 13f
+                setTextColor(Color.WHITE)
+                typeface = Typeface.DEFAULT_BOLD
+            }
+            val subtitleView = TextView(context).apply {
+                text = "${moveInfo.type.displayName} • ${if (moveInfo.power > 0) "${moveInfo.power} Pwr" else "Status"}"
+                textSize = 10.5f
+                setTextColor(if (isSelected) 0xFFEEEEEE.toInt() else 0xFFB0C4DE.toInt())
+            }
+            moveBtn.addView(titleView)
+            moveBtn.addView(subtitleView)
+
             val lp = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, 0, 10, 6)
             }
             btnRow.addView(moveBtn, lp)
         }
-        movesContainer.addView(btnRow)
+        movesScroll.addView(btnRow)
+        movesContainer.addView(movesScroll)
 
-        if (selectedMoveName.isEmpty() && availableMoves.isNotEmpty()) {
-            selectedMoveName = availableMoves[0]
+        if ((selectedMoveName.isEmpty() || availableMoves.none { m: MoveInfo -> m.name == selectedMoveName }) && availableMoves.isNotEmpty()) {
+            selectedMoveName = availableMoves[0].name
         }
         recalculate()
     }

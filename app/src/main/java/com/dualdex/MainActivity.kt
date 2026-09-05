@@ -240,7 +240,7 @@ class MainActivity : AppCompatActivity(), DisplayManager.DisplayListener {
                 }
 
                 // Detect ROM Hack Profile via SHA-256 and header title
-                val profile = RomHackDetector.detectProfile(localRomFile, loadedProfiles)
+                val profile = RomHackDetector.detectProfile(localRomFile, loadedProfiles, preferredTitle)
                 val gameTitle = preferredTitle ?: profile.name.ifEmpty { "current_game" }
                 settingsManager.lastPlayedRomUri = uri.toString()
                 settingsManager.lastPlayedRomTitle = gameTitle

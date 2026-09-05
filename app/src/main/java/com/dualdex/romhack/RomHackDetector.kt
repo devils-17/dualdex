@@ -6,7 +6,7 @@ import java.security.MessageDigest
 
 object RomHackDetector {
 
-    fun detectProfile(romFile: File, profiles: List<RomHackProfile>): RomHackProfile {
+    fun detectProfile(romFile: File, profiles: List<RomHackProfile>, preferredTitle: String? = null): RomHackProfile {
         if (!romFile.exists()) return RomHackProfile.DEFAULT_FIRERED
 
         val headerBytes = ByteArray(192)
@@ -25,13 +25,14 @@ object RomHackDetector {
             e.printStackTrace()
         }
 
-        return detectProfileFromBytes(headerBytes, sha256, profiles)
+        return detectProfileFromBytes(headerBytes, sha256, profiles, preferredTitle ?: romFile.name)
     }
 
     fun detectProfileFromBytes(
         headerBytes: ByteArray,
         sha256: String = "",
-        profiles: List<RomHackProfile>
+        profiles: List<RomHackProfile>,
+        fileName: String = ""
     ): RomHackProfile {
         // Extract 12-byte ROM title at offset 0xA0 (160)
         val titleStr = if (headerBytes.size >= 172) {
@@ -51,6 +52,17 @@ object RomHackDetector {
             for (p in profiles) {
                 if (p.sha256Hashes.contains(lowerHash)) {
                     return p
+                }
+            }
+        }
+
+        // 1.5. Check filename / preferred title for hack keywords (e.g. "Heart and Soul", "Ghost Grey")
+        if (fileName.isNotBlank()) {
+            for (p in profiles) {
+                for (ht in p.headerTitles) {
+                    if (fileName.contains(ht, ignoreCase = true)) {
+                        return p
+                    }
                 }
             }
         }

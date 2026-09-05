@@ -56,6 +56,23 @@ static const GameMemoryConfig CONFIG_EMERALD = {
     .player_party_count_offset = 0x244E9,
     .enemy_party_offset = 0x24744,
     .enemy_party_count_offset = 0x24740,
+    .battle_mons_offset = 0x24064,
+    .battle_mons_size = 88,
+    .battle_mons_hp_offset = 40,
+    .has_evs = true,
+    .has_ivs = true
+};
+
+static const GameMemoryConfig CONFIG_HEART_AND_SOUL = {
+    .game_id = GAME_HEART_AND_SOUL,
+    .game_name = "Pokemon Heart & Soul",
+    .player_party_offset = 0x340F4,
+    .player_party_count_offset = 0x340F0,
+    .enemy_party_offset = 0x345A4,
+    .enemy_party_count_offset = 0x345A0,
+    .battle_mons_offset = 0x3A5A4,
+    .battle_mons_size = 96,
+    .battle_mons_hp_offset = 46,
     .has_evs = true,
     .has_ivs = true
 };
@@ -67,6 +84,9 @@ static const GameMemoryConfig CONFIG_FIRERED = {
     .player_party_count_offset = 0x24029,
     .enemy_party_offset = 0x2402C,
     .enemy_party_count_offset = 0x24028,
+    .battle_mons_offset = 0x23F90,
+    .battle_mons_size = 88,
+    .battle_mons_hp_offset = 40,
     .has_evs = true,
     .has_ivs = true
 };
@@ -78,6 +98,9 @@ static const GameMemoryConfig CONFIG_LEAFGREEN = {
     .player_party_count_offset = 0x24029,
     .enemy_party_offset = 0x2402C,
     .enemy_party_count_offset = 0x24028,
+    .battle_mons_offset = 0x23F90,
+    .battle_mons_size = 88,
+    .battle_mons_hp_offset = 40,
     .has_evs = true,
     .has_ivs = true
 };
@@ -140,6 +163,17 @@ GbaGameId pokemon_detect_game(const char* rom_title_16) {
     strncpy(title_buf, rom_title_16, 16);
     title_buf[16] = '\0';
 
+    // Check custom hack headers first
+    if (strstr(title_buf, "HEARTSOUL") != NULL || strstr(title_buf, "HNS") != NULL || strstr(title_buf, "HEART") != NULL) {
+        return GAME_HEART_AND_SOUL;
+    }
+    if (strstr(title_buf, "GHOST") != NULL || strstr(title_buf, "GREY") != NULL) {
+        return GAME_GHOST_GREY;
+    }
+    if (strstr(title_buf, "RADICAL") != NULL) {
+        return GAME_RADICAL_RED;
+    }
+
     // Check title in ROM header (offset 0xA0)
     if (strncmp(title_buf, "POKEMON EMER", 12) == 0) return GAME_EMERALD;
     if (strncmp(title_buf, "POKEMON FIRE", 12) == 0) return GAME_FIRERED;
@@ -147,22 +181,12 @@ GbaGameId pokemon_detect_game(const char* rom_title_16) {
     if (strncmp(title_buf, "POKEMON RUBY", 12) == 0) return GAME_RUBY;
     if (strncmp(title_buf, "POKEMON SAPP", 12) == 0) return GAME_SAPPHIRE;
 
-    // Check custom hack headers if present
-    if (strstr(title_buf, "GHOST") != NULL || strstr(title_buf, "GREY") != NULL) {
-        return GAME_GHOST_GREY;
-    }
-    if (strstr(title_buf, "RADICAL") != NULL) {
-        return GAME_RADICAL_RED;
-    }
-    if (strstr(title_buf, "HEARTSOUL") != NULL || strstr(title_buf, "HNS") != NULL || strstr(title_buf, "HEART") != NULL) {
-        return GAME_EMERALD;
-    }
-
     return GAME_UNKNOWN;
 }
 
 const GameMemoryConfig* pokemon_get_game_config(GbaGameId game_id) {
     switch (game_id) {
+        case GAME_HEART_AND_SOUL: return &CONFIG_HEART_AND_SOUL;
         case GAME_EMERALD: return &CONFIG_EMERALD;
         case GAME_FIRERED: return &CONFIG_FIRERED;
         case GAME_LEAFGREEN: return &CONFIG_LEAFGREEN;
@@ -400,6 +424,12 @@ uint8_t pokemon_scan_ewram_for_party(
         // Calculate confidence score for this candidate
         int score = candidate_snap.count * 100;
 
+        // Live EWRAM .bss section bonus: live game party resides in BSS (>= 0x20000).
+        // Low memory (< 0x20000) holds SaveBlock serialization buffers which are static snapshots.
+        if (off >= 0x20000) {
+            score += 1000;
+        }
+
         // Check preceding 4 bytes for gPlayerPartyCount matching candidate_snap.count
         bool party_count_matched = false;
         if (off >= 4) {
@@ -436,7 +466,7 @@ uint8_t pokemon_scan_ewram_for_party(
             }
         }
 
-        if (score > best_score) {
+        if (score >= best_score) {
             best_score = score;
             best_offset = off;
             best_snapshot = candidate_snap;
@@ -466,30 +496,9 @@ uint8_t pokemon_read_player_party(
 ) {
     if (!ewram || !out_snapshot) return 0;
     memset(out_snapshot, 0, sizeof(PartySnapshot));
+    out_snapshot->active_battler_slot = -1;
 
-    // 1. Try cached dynamically scanned offset FIRST (fast, reliable path for ROM hacks & vanilla)
-    if (s_cached_player_party_offset > 0 && s_cached_player_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
-        ParsedPokemon first_mon;
-        const uint8_t* mon_ptr = ewram + s_cached_player_party_offset;
-        if (pokemon_parse_single(mon_ptr, true, &first_mon) && first_mon.species > 0 && first_mon.species < 2000) {
-            uint8_t valid_count = 0;
-            out_snapshot->members[valid_count++] = first_mon;
-            for (uint8_t i = 1; i < 6; i++) {
-                const uint8_t* p = ewram + s_cached_player_party_offset + (i * sizeof(RawGbaPokemon));
-                if (pokemon_parse_single(p, true, &out_snapshot->members[valid_count])) {
-                    if (out_snapshot->members[valid_count].species > 0 && out_snapshot->members[valid_count].species < 2000) {
-                        valid_count++;
-                    } else break;
-                } else break;
-            }
-            out_snapshot->count = valid_count;
-            return valid_count;
-        } else {
-            s_cached_player_party_offset = 0;
-        }
-    }
-
-    // 2. Try configured static offset (fast fallback for vanilla games)
+    // 1. Try configured static offset (fast, reliable path for vanilla & supported hacks)
     if (config && config->player_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
         ParsedPokemon first_mon;
         const uint8_t* mon_ptr = ewram + config->player_party_offset;
@@ -505,10 +514,6 @@ uint8_t pokemon_read_player_party(
                 } else break;
             }
 
-            // CRITICAL: If a player_party_count_offset is defined,
-            // the byte at that offset MUST match valid_count (1..6).
-            // In ROM hacks (e.g. Heart & Soul / pokeemerald-expansion), memory layout shifts,
-            // so an unrelated struct might reside at 0x244EC with valid_count != gPlayerPartyCount.
             bool count_verified = true;
             if (config->player_party_count_offset > 0 && config->player_party_count_offset < ewram_size) {
                 uint8_t expected_count = ewram[config->player_party_count_offset];
@@ -520,18 +525,87 @@ uint8_t pokemon_read_player_party(
             if (count_verified && valid_count > 0) {
                 out_snapshot->count = valid_count;
                 s_cached_player_party_offset = (uint32_t)config->player_party_offset;
-                static int s_static_log_counter = 0;
-                if ((++s_static_log_counter % 30) == 1) {
-                    LOG_PARTY("Static party offset 0x%X matched: count=%d, lead='%s', species=%d, lvl=%d",
-                              config->player_party_offset, valid_count, first_mon.nickname, first_mon.species, first_mon.level);
+
+                // If in battle and battle_mons is configured, sync live battler 0 (player active mon)
+                if (config->battle_mons_offset > 0 && config->battle_mons_offset + config->battle_mons_size <= ewram_size) {
+                    const uint8_t* b0 = ewram + config->battle_mons_offset;
+                    uint16_t b0_species = read16_le(b0);
+                    if (b0_species > 0 && b0_species < 2000) {
+                        uint16_t b0_hp = read16_le(b0 + config->battle_mons_hp_offset);
+                        for (uint8_t i = 0; i < valid_count; i++) {
+                            if (out_snapshot->members[i].species == b0_species) {
+                                if (b0_hp <= out_snapshot->members[i].max_hp) {
+                                    out_snapshot->members[i].current_hp = b0_hp;
+                                }
+                                out_snapshot->active_battler_slot = (int8_t)i;
+                                break;
+                            }
+                        }
+                    }
                 }
                 return valid_count;
             }
         }
     }
 
-    // 3. Fallback: Dynamic EWRAM Pattern Scan (Heart & Soul, pokeemerald-expansion, ROM hacks)
-    return pokemon_scan_ewram_for_party(ewram, ewram_size, out_snapshot);
+    // 2. Try cached dynamically scanned offset
+    if (s_cached_player_party_offset > 0 && s_cached_player_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
+        ParsedPokemon first_mon;
+        const uint8_t* mon_ptr = ewram + s_cached_player_party_offset;
+        if (pokemon_parse_single(mon_ptr, true, &first_mon) && first_mon.species > 0 && first_mon.species < 2000) {
+            uint8_t valid_count = 0;
+            out_snapshot->members[valid_count++] = first_mon;
+            for (uint8_t i = 1; i < 6; i++) {
+                const uint8_t* p = ewram + s_cached_player_party_offset + (i * sizeof(RawGbaPokemon));
+                if (pokemon_parse_single(p, true, &out_snapshot->members[valid_count])) {
+                    if (out_snapshot->members[valid_count].species > 0 && out_snapshot->members[valid_count].species < 2000) {
+                        valid_count++;
+                    } else break;
+                } else break;
+            }
+            out_snapshot->count = valid_count;
+
+            if (config && config->battle_mons_offset > 0 && config->battle_mons_offset + config->battle_mons_size <= ewram_size) {
+                const uint8_t* b0 = ewram + config->battle_mons_offset;
+                uint16_t b0_species = read16_le(b0);
+                if (b0_species > 0 && b0_species < 2000) {
+                    uint16_t b0_hp = read16_le(b0 + config->battle_mons_hp_offset);
+                    for (uint8_t i = 0; i < valid_count; i++) {
+                        if (out_snapshot->members[i].species == b0_species) {
+                            if (b0_hp <= out_snapshot->members[i].max_hp) {
+                                out_snapshot->members[i].current_hp = b0_hp;
+                            }
+                            out_snapshot->active_battler_slot = (int8_t)i;
+                            break;
+                        }
+                    }
+                }
+            }
+            return valid_count;
+        } else {
+            s_cached_player_party_offset = 0;
+        }
+    }
+
+    // 3. Fallback: Dynamic EWRAM Pattern Scan (ROM hacks, custom builds)
+    uint8_t count = pokemon_scan_ewram_for_party(ewram, ewram_size, out_snapshot);
+    if (count > 0 && config && config->battle_mons_offset > 0 && config->battle_mons_offset + config->battle_mons_size <= ewram_size) {
+        const uint8_t* b0 = ewram + config->battle_mons_offset;
+        uint16_t b0_species = read16_le(b0);
+        if (b0_species > 0 && b0_species < 2000) {
+            uint16_t b0_hp = read16_le(b0 + config->battle_mons_hp_offset);
+            for (uint8_t i = 0; i < count; i++) {
+                if (out_snapshot->members[i].species == b0_species) {
+                    if (b0_hp <= out_snapshot->members[i].max_hp) {
+                        out_snapshot->members[i].current_hp = b0_hp;
+                    }
+                    out_snapshot->active_battler_slot = (int8_t)i;
+                    break;
+                }
+            }
+        }
+    }
+    return count;
 }
 
 uint8_t pokemon_read_enemy_party(
@@ -542,8 +616,9 @@ uint8_t pokemon_read_enemy_party(
 ) {
     if (!ewram || !out_snapshot) return 0;
     memset(out_snapshot, 0, sizeof(PartySnapshot));
+    out_snapshot->active_battler_slot = -1;
 
-    // Player party must be located to know the player's OTID and relative offset
+    // Player party must be located to know the player's OTID
     if (s_cached_player_party_offset == 0 || s_cached_player_party_offset + sizeof(RawGbaPokemon) > ewram_size) {
         return 0;
     }
@@ -551,32 +626,27 @@ uint8_t pokemon_read_enemy_party(
     const RawGbaPokemon* player_mon = (const RawGbaPokemon*)(ewram + s_cached_player_party_offset);
     uint32_t player_otid = player_mon->otid;
 
-    // 1. Verify in-battle indicator from gEnemyPartyCount
-    // If a static count offset is configured and explicitly 0, we are definitely NOT in battle
-    if (config && config->enemy_party_count_offset > 0 && config->enemy_party_count_offset < ewram_size) {
-        uint8_t count_byte = ewram[config->enemy_party_count_offset];
-        if (count_byte == 0 || count_byte > 6) {
-            return 0; // Not in battle
-        }
-    }
-
     // Candidate enemy party locations:
-    // 1. Expansion layout: player_offset + 1200 (gPlayerParty 600B + gPlayerPartyBackup 600B)
-    // 2. Standard layout: player_offset + 600 (gPlayerParty 600B)
-    // 3. Static config layout: config->enemy_party_offset
-    size_t candidate_offsets[3];
+    // 1. Configured enemy_party_offset (e.g. 0x345A4 for Heart & Soul, 0x24744 for Emerald)
+    // 2. Expansion layout: player_offset + 1200 (gPlayerParty 600B + gPlayerPartyBackup 600B)
+    // 3. Standard layout: player_offset + 600 (gPlayerParty 600B)
+    // 4. Cached dynamic offset
+    size_t candidate_offsets[4];
     int num_candidates = 0;
 
+    if (config && config->enemy_party_offset > 0 && config->enemy_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
+        if (config->enemy_party_offset != s_cached_player_party_offset) {
+            candidate_offsets[num_candidates++] = config->enemy_party_offset;
+        }
+    }
+    if (s_cached_enemy_party_offset > 0 && s_cached_enemy_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
+        candidate_offsets[num_candidates++] = s_cached_enemy_party_offset;
+    }
     if (s_cached_player_party_offset + (12 * sizeof(RawGbaPokemon)) + sizeof(RawGbaPokemon) <= ewram_size) {
         candidate_offsets[num_candidates++] = s_cached_player_party_offset + (12 * sizeof(RawGbaPokemon));
     }
     if (s_cached_player_party_offset + (6 * sizeof(RawGbaPokemon)) + sizeof(RawGbaPokemon) <= ewram_size) {
         candidate_offsets[num_candidates++] = s_cached_player_party_offset + (6 * sizeof(RawGbaPokemon));
-    }
-    if (config && config->enemy_party_offset > 0 && config->enemy_party_offset + sizeof(RawGbaPokemon) <= ewram_size) {
-        if (config->enemy_party_offset != s_cached_player_party_offset) {
-            candidate_offsets[num_candidates++] = config->enemy_party_offset;
-        }
     }
 
     for (int c = 0; c < num_candidates; c++) {
@@ -611,7 +681,81 @@ uint8_t pokemon_read_enemy_party(
         }
         out_snapshot->count = count;
         s_cached_enemy_party_offset = (uint32_t)off;
+
+        // Sync live in-battle HP for enemy battler 1 if battle_mons is configured
+        if (config && config->battle_mons_offset > 0 &&
+            config->battle_mons_offset + (2 * config->battle_mons_size) <= ewram_size) {
+            const uint8_t* b1 = ewram + config->battle_mons_offset + config->battle_mons_size;
+            uint16_t b1_species = read16_le(b1);
+            if (b1_species > 0 && b1_species < 2000) {
+                uint16_t b1_hp = read16_le(b1 + config->battle_mons_hp_offset);
+                for (uint8_t i = 0; i < count; i++) {
+                    if (out_snapshot->members[i].species == b1_species) {
+                        if (b1_hp <= out_snapshot->members[i].max_hp) {
+                            out_snapshot->members[i].current_hp = b1_hp;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         return count;
+    }
+
+    // Fallback: Full EWRAM scan for an active enemy party (wild or trainer battle)
+    // Live parties in GBA games reside in the BSS area (>= 0x20000)
+    size_t scan_start = 0x20000;
+    if (scan_start + sizeof(RawGbaPokemon) < ewram_size) {
+        size_t scan_end = ewram_size - sizeof(RawGbaPokemon);
+        for (size_t off = scan_start; off <= scan_end; off += 4) {
+            if (off == s_cached_player_party_offset) continue;
+            const RawGbaPokemon* raw = (const RawGbaPokemon*)(ewram + off);
+            if (raw->pid == 0 || raw->otid == 0 || raw->otid == player_otid) continue;
+            if (raw->max_hp == 0 || raw->max_hp > 2000) continue;
+            if (raw->current_hp > raw->max_hp || raw->current_hp == 0) continue;
+            if (raw->level == 0 || raw->level > 100) continue;
+            if (raw->attack == 0 || raw->defense == 0) continue;
+
+            ParsedPokemon test_mon;
+            if (!pokemon_parse_single((const uint8_t*)raw, true, &test_mon)) continue;
+            if (test_mon.species == 0 || test_mon.species >= 2000 || test_mon.current_hp == 0) continue;
+
+            // Found enemy party via scan!
+            uint8_t count = 0;
+            out_snapshot->members[count++] = test_mon;
+            for (uint8_t slot = 1; slot < 6; slot++) {
+                size_t next_off = off + (slot * sizeof(RawGbaPokemon));
+                if (next_off + sizeof(RawGbaPokemon) > ewram_size) break;
+                ParsedPokemon next_mon;
+                if (pokemon_parse_single(ewram + next_off, true, &next_mon)) {
+                    if (next_mon.species > 0 && next_mon.species < 2000) {
+                        out_snapshot->members[count++] = next_mon;
+                    } else break;
+                } else break;
+            }
+            out_snapshot->count = count;
+            s_cached_enemy_party_offset = (uint32_t)off;
+
+            if (config && config->battle_mons_offset > 0 &&
+                config->battle_mons_offset + (2 * config->battle_mons_size) <= ewram_size) {
+                const uint8_t* b1 = ewram + config->battle_mons_offset + config->battle_mons_size;
+                uint16_t b1_species = read16_le(b1);
+                if (b1_species > 0 && b1_species < 2000) {
+                    uint16_t b1_hp = read16_le(b1 + config->battle_mons_hp_offset);
+                    for (uint8_t i = 0; i < count; i++) {
+                        if (out_snapshot->members[i].species == b1_species) {
+                            if (b1_hp <= out_snapshot->members[i].max_hp) {
+                                out_snapshot->members[i].current_hp = b1_hp;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return count;
+        }
     }
 
     s_cached_enemy_party_offset = 0;
@@ -627,26 +771,32 @@ bool pokemon_read_player_location(
     if (!ewram || ewram_size == 0 || !out_location) return false;
     memset(out_location, 0, sizeof(PlayerLocationRaw));
 
-    uint32_t party_off = s_cached_player_party_offset;
-    if (party_off == 0) {
-        if (config && config->player_party_offset > 0 && config->player_party_offset + 100 <= ewram_size) {
-            party_off = (uint32_t)config->player_party_offset;
+    const uint8_t* sb1 = NULL;
+    if (config && config->game_id == GAME_HEART_AND_SOUL) {
+        // In Heart & Soul, SaveBlock1 is located at EWRAM base (0x02000000)
+        sb1 = ewram;
+    } else {
+        uint32_t party_off = s_cached_player_party_offset;
+        if (party_off == 0) {
+            if (config && config->player_party_offset > 0 && config->player_party_offset + 100 <= ewram_size) {
+                party_off = (uint32_t)config->player_party_offset;
+            }
+        }
+
+        if (party_off == 0) return false;
+
+        // Determine SaveBlock1 offset relative to player party
+        // In Emerald / Ruby / Sapphire: SaveBlock1.playerParty is at offset 0x238
+        // In FireRed / LeafGreen: SaveBlock1.playerParty is at offset 0x38
+        bool is_firered = (config && config->game_id == GAME_FIRERED);
+        size_t sb1_party_offset = is_firered ? 0x38 : 0x238;
+
+        if (party_off >= sb1_party_offset && party_off - sb1_party_offset + sizeof(PlayerLocationRaw) <= ewram_size) {
+            sb1 = ewram + (party_off - sb1_party_offset);
+        } else {
+            sb1 = ewram;
         }
     }
-
-    if (party_off == 0) return false;
-
-    // Determine SaveBlock1 offset relative to player party
-    // In Emerald / Ruby / Sapphire / Heart & Soul: SaveBlock1.playerParty is at offset 0x238
-    // In FireRed / LeafGreen: SaveBlock1.playerParty is at offset 0x38
-    bool is_firered = (config && config->game_id == GAME_FIRERED);
-    size_t sb1_party_offset = is_firered ? 0x38 : 0x238;
-
-    if (party_off < sb1_party_offset || party_off >= ewram_size) {
-        return false;
-    }
-
-    const uint8_t* sb1 = ewram + (party_off - sb1_party_offset);
 
     // Read Coords16 pos (offset 0x00)
     int16_t pos_x = (int16_t)(sb1[0] | (sb1[1] << 8));

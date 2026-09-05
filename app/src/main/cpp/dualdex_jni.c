@@ -446,6 +446,8 @@ Java_com_dualdex_emulator_LibretroHost_nativeGetOutputAudioSampleRate(
     return (jint)libretro_host_get_output_sample_rate();
 }
 
+static int8_t s_last_active_battler_slot = -1;
+
 JNIEXPORT jobjectArray JNICALL
 Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobject thiz, jint game_id) {
     (void)thiz;
@@ -464,6 +466,7 @@ Java_com_dualdex_emulator_LibretroHost_nativeReadPartyFromCore(JNIEnv* env, jobj
     const GameMemoryConfig* cfg = pokemon_get_game_config((GbaGameId)game_id);
     PartySnapshot snapshot;
     uint8_t count = pokemon_read_player_party(ewram, ewram_sz, cfg, &snapshot);
+    s_last_active_battler_slot = snapshot.active_battler_slot;
 
     static int s_party_log_counter = 0;
     if ((++s_party_log_counter % 30) == 1) {
@@ -520,6 +523,14 @@ Java_com_dualdex_emulator_LibretroHost_nativeReadEnemyPartyFromCore(JNIEnv* env,
     }
 
     return array;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_dualdex_emulator_LibretroHost_nativeGetActiveBattlerSlot(JNIEnv* env, jobject thiz, jint game_id) {
+    (void)env;
+    (void)thiz;
+    (void)game_id;
+    return (jint)s_last_active_battler_slot;
 }
 
 JNIEXPORT jobject JNICALL

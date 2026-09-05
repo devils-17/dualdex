@@ -21,7 +21,8 @@ typedef enum {
     GAME_RUBY,
     GAME_SAPPHIRE,
     GAME_GHOST_GREY,     // Custom FireRed binary hack
-    GAME_RADICAL_RED     // CFRU FireRed hack
+    GAME_RADICAL_RED,    // CFRU FireRed hack
+    GAME_HEART_AND_SOUL  // pokeemerald-expansion Heart & Soul 2.0
 } GbaGameId;
 
 /**
@@ -34,6 +35,9 @@ typedef struct {
     uint32_t player_party_count_offset;// Offset relative to EWRAM
     uint32_t enemy_party_offset;       // Offset relative to EWRAM (for battle reading)
     uint32_t enemy_party_count_offset; // Offset relative to EWRAM
+    uint32_t battle_mons_offset;       // Offset relative to EWRAM for gBattleMons
+    uint32_t battle_mons_size;         // Size of struct BattlePokemon
+    uint32_t battle_mons_hp_offset;    // Offset of hp within struct BattlePokemon
     bool     has_evs;                  // False for Ghost Grey
     bool     has_ivs;                  // False for Ghost Grey
 } GameMemoryConfig;

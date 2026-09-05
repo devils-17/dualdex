@@ -114,11 +114,18 @@ class CompanionViewModel(
                     }
 
                     val enemyPartyRaw = LibretroHost.nativeReadEnemyPartyFromCore(gameId)
-                    if (enemyPartyRaw != null) {
-                        val enemyList = enemyPartyRaw.filterNotNull().filter { !it.isEmpty && it.isValid }
-                        if (enemyList != _enemyParty.value) {
-                            _enemyParty.value = enemyList
-                            _isInBattle.value = enemyList.isNotEmpty()
+                    val enemyList = enemyPartyRaw?.filterNotNull()?.filter { !it.isEmpty && it.isValid } ?: emptyList()
+                    if (enemyList != _enemyParty.value) {
+                        _enemyParty.value = enemyList
+                    }
+                    val inBattle = enemyList.isNotEmpty()
+                    if (inBattle != _isInBattle.value) {
+                        _isInBattle.value = inBattle
+                    }
+                    if (inBattle) {
+                        val activeSlot = LibretroHost.nativeGetActiveBattlerSlot(gameId)
+                        if (activeSlot in 0..5 && activeSlot != _selectedMemberIndex.value) {
+                            _selectedMemberIndex.value = activeSlot
                         }
                     }
 

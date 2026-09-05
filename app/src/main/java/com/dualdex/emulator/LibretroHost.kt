@@ -20,6 +20,7 @@ object LibretroHost {
     external fun nativeGetOutputAudioSampleRate(): Int
     external fun nativeReadPartyFromCore(gameId: Int): Array<ParsedPokemon>?
     external fun nativeReadEnemyPartyFromCore(gameId: Int): Array<ParsedPokemon>?
+    external fun nativeGetActiveBattlerSlot(gameId: Int): Int
     external fun nativeReadPlayerLocation(gameId: Int): PlayerLocation?
     external fun nativeSaveState(statePath: String): Boolean
     external fun nativeLoadState(statePath: String): Boolean

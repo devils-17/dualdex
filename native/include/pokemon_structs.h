@@ -155,6 +155,7 @@ typedef struct {
 typedef struct {
     uint8_t       count;
     ParsedPokemon members[6];
+    int8_t        active_battler_slot; // -1 if not in battle/unknown, 0..5 for active battler
 } PartySnapshot;
 
 #ifdef __cplusplus

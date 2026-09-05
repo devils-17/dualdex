@@ -455,6 +455,157 @@ static void test_ewram_scan_ignores_box_pokemon_and_finds_real_party(void) {
     printf(ANSI_GREEN "  [PASS] test_ewram_scan_ignores_box_pokemon_and_finds_real_party" ANSI_RESET "\n");
 }
 
+static void test_heart_and_soul_party_and_battle_hp_sync(void) {
+    printf("Running test_heart_and_soul_party_and_battle_hp_sync...\n");
+
+    const size_t EWRAM_SIZE = 256 * 1024;
+    uint8_t* ewram = (uint8_t*)calloc(1, EWRAM_SIZE);
+    TEST_ASSERT(ewram != NULL, "Memory allocation for EWRAM failed");
+
+    pokemon_reader_reset();
+
+    // 1. Verify game detection
+    GbaGameId detected = pokemon_detect_game("POKEMON HEART SOUL");
+    TEST_ASSERT(detected == GAME_HEART_AND_SOUL, "POKEMON HEART SOUL should detect as GAME_HEART_AND_SOUL");
+
+    const GameMemoryConfig* hns_cfg = pokemon_get_game_config(GAME_HEART_AND_SOUL);
+    TEST_ASSERT(hns_cfg != NULL, "Heart and Soul config must exist");
+    TEST_ASSERT(hns_cfg->player_party_offset == 0x340F4, "HnS player party offset must be 0x340F4");
+    TEST_ASSERT(hns_cfg->enemy_party_offset == 0x345A4, "HnS enemy party offset must be 0x345A4");
+    TEST_ASSERT(hns_cfg->battle_mons_offset == 0x3A5A4, "HnS battle_mons offset must be 0x3A5A4");
+
+    // 2. Setup Player Party (2 Pokemon: Cyndaquil #155 and Totodile #158)
+    ewram[hns_cfg->player_party_count_offset] = 2;
+
+    uint32_t player_otid = 0x88776655;
+
+    // Cyndaquil in slot 0
+    {
+        RawGbaPokemon mon;
+        memset(&mon, 0, sizeof(mon));
+        mon.pid = 0x11223344;
+        mon.otid = player_otid;
+        mon.level = 14;
+        mon.max_hp = 50;
+        mon.current_hp = 50; // Full HP in static party
+        mon.attack = 25;
+        mon.defense = 22;
+        mon.speed = 30;
+        mon.sp_attack = 32;
+        mon.sp_defense = 24;
+
+        SubstructGrowth g = {.species = 155}; // Cyndaquil
+        SubstructAttacks a = {.moves = {33, 52, 0, 0}, .pp = {35, 25, 0, 0}}; // Tackle, Ember
+        SubstructEVs e = {0};
+        SubstructMisc m = {.iv_egg_ability = 31};
+
+        pack_and_encrypt(mon.pid, mon.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         mon.raw_substructures, &mon.checksum);
+        memcpy(ewram + hns_cfg->player_party_offset, &mon, sizeof(RawGbaPokemon));
+    }
+
+    // Totodile in slot 1
+    {
+        RawGbaPokemon mon;
+        memset(&mon, 0, sizeof(mon));
+        mon.pid = 0x55667788;
+        mon.otid = player_otid;
+        mon.level = 15;
+        mon.max_hp = 60;
+        mon.current_hp = 60; // Full HP in static party
+        mon.attack = 32;
+        mon.defense = 30;
+        mon.speed = 22;
+        mon.sp_attack = 24;
+        mon.sp_defense = 26;
+
+        SubstructGrowth g = {.species = 158}; // Totodile
+        SubstructAttacks a = {.moves = {33, 55, 0, 0}, .pp = {35, 30, 0, 0}}; // Tackle, Water Gun
+        SubstructEVs e = {0};
+        SubstructMisc m = {.iv_egg_ability = 31};
+
+        pack_and_encrypt(mon.pid, mon.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         mon.raw_substructures, &mon.checksum);
+        memcpy(ewram + hns_cfg->player_party_offset + sizeof(RawGbaPokemon), &mon, sizeof(RawGbaPokemon));
+    }
+
+    // 3. Setup Enemy Party (Pidgey #16 in enemy slot 0)
+    ewram[hns_cfg->enemy_party_count_offset] = 1;
+    {
+        RawGbaPokemon enemy;
+        memset(&enemy, 0, sizeof(enemy));
+        enemy.pid = 0xAABBCCDD;
+        enemy.otid = 0x99990000; // Different OTID
+        enemy.level = 13;
+        enemy.max_hp = 40;
+        enemy.current_hp = 40;
+        enemy.attack = 20;
+        enemy.defense = 18;
+        enemy.speed = 28;
+        enemy.sp_attack = 18;
+        enemy.sp_defense = 18;
+
+        SubstructGrowth g = {.species = 16}; // Pidgey
+        SubstructAttacks a = {.moves = {33, 16, 0, 0}, .pp = {35, 35, 0, 0}}; // Tackle, Gust
+        SubstructEVs e = {0};
+        SubstructMisc m = {.iv_egg_ability = 25};
+
+        pack_and_encrypt(enemy.pid, enemy.otid,
+                         (uint8_t*)&g, (uint8_t*)&a, (uint8_t*)&e, (uint8_t*)&m,
+                         enemy.raw_substructures, &enemy.checksum);
+        memcpy(ewram + hns_cfg->enemy_party_offset, &enemy, sizeof(RawGbaPokemon));
+    }
+
+    // 4. Populate live gBattleMons (BattlePokemon struct size = 96, HP at offset 46)
+    // Battler 0: Player active mon (Cyndaquil #155), took damage! HP is 28/50
+    uint8_t* b0 = ewram + hns_cfg->battle_mons_offset;
+    b0[0] = 155 & 0xFF; // species low
+    b0[1] = (155 >> 8) & 0xFF; // species high
+    b0[46] = 28; // current HP low
+    b0[47] = 0;  // current HP high
+
+    // Battler 1: Enemy active mon (Pidgey #16), took damage! HP is 12/40
+    uint8_t* b1 = ewram + hns_cfg->battle_mons_offset + hns_cfg->battle_mons_size;
+    b1[0] = 16 & 0xFF; // species low
+    b1[1] = (16 >> 8) & 0xFF; // species high
+    b1[46] = 12; // current HP low
+    b1[47] = 0;  // current HP high
+
+    // 5. Read player party and verify live HP sync & active battler slot
+    PartySnapshot player_snap;
+    uint8_t player_count = pokemon_read_player_party(ewram, EWRAM_SIZE, hns_cfg, &player_snap);
+    TEST_ASSERT(player_count == 2, "Player party count should be 2");
+    TEST_ASSERT(player_snap.members[0].species == 155, "Slot 0 should be Cyndaquil");
+    TEST_ASSERT(player_snap.members[0].current_hp == 28, "Cyndaquil HP should be 28 (live from gBattleMons!)");
+    TEST_ASSERT(player_snap.members[1].species == 158, "Slot 1 should be Totodile");
+    TEST_ASSERT(player_snap.members[1].current_hp == 60, "Totodile HP should remain 60");
+    TEST_ASSERT(player_snap.active_battler_slot == 0, "Active battler slot should be 0 (Cyndaquil)");
+
+    // 6. Read enemy party and verify live HP sync
+    PartySnapshot enemy_snap;
+    uint8_t enemy_count = pokemon_read_enemy_party(ewram, EWRAM_SIZE, hns_cfg, &enemy_snap);
+    TEST_ASSERT(enemy_count == 1, "Enemy party count should be 1");
+    TEST_ASSERT(enemy_snap.members[0].species == 16, "Enemy slot 0 should be Pidgey");
+    TEST_ASSERT(enemy_snap.members[0].current_hp == 12, "Enemy Pidgey HP should be 12 (live from gBattleMons!)");
+
+    // 7. Test mid-battle switch: player sends out Totodile (species 158), HP = 48
+    b0[0] = 158 & 0xFF;
+    b0[1] = (158 >> 8) & 0xFF;
+    b0[46] = 48;
+    b0[47] = 0;
+
+    PartySnapshot switch_snap;
+    pokemon_read_player_party(ewram, EWRAM_SIZE, hns_cfg, &switch_snap);
+    TEST_ASSERT(switch_snap.active_battler_slot == 1, "Active battler slot should now be 1 (Totodile) after switch!");
+    TEST_ASSERT(switch_snap.members[1].current_hp == 48, "Totodile HP should now be 48 (live from gBattleMons!)");
+
+    free(ewram);
+    g_tests_passed++;
+    printf(ANSI_GREEN "  [PASS] test_heart_and_soul_party_and_battle_hp_sync" ANSI_RESET "\n");
+}
+
 int main(void) {
     printf("===================================================\n");
     printf("   DualDex Gen 3 Memory Parser Test Suite\n");
@@ -467,6 +618,7 @@ int main(void) {
     test_shininess_calculation();
     test_ewram_party_parsing();
     test_ewram_scan_ignores_box_pokemon_and_finds_real_party();
+    test_heart_and_soul_party_and_battle_hp_sync();
 
     printf("===================================================\n");
     printf("Results: %d Passed, %d Failed\n", g_tests_passed, g_tests_failed);

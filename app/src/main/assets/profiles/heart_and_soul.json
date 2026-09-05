@@ -2,7 +2,7 @@
   "id": "heart_and_soul",
   "name": "Pokemon Heart & Soul",
   "baseGame": "Emerald",
-  "gameId": 1,
+  "gameId": 8,
   "developer": "Lil Dill / PokemonHnS-Development",
   "engine": "pokeemerald-expansion",
   "hasEvs": true,
@@ -10,9 +10,9 @@
   "hasPhysSpecSplit": true,
   "steelResistsGhostDark": false,
   "cfruOffsets": false,
-  "playerPartyOffset": 33703148,
-  "enemyPartyOffset": 33703748,
+  "playerPartyOffset": 213236,
+  "enemyPartyOffset": 214436,
   "docsUrl": "https://pokemonhns-development.github.io/pokehns-expansion-documentation/",
-  "headerTitles": ["HEARTSOUL", "HNS", "POKEHNS", "POKEMON EMER", "BPEE"],
+  "headerTitles": ["HEARTSOUL", "HNS", "POKEHNS", "HEART", "SOUL"],
   "sha256Hashes": []
 }
